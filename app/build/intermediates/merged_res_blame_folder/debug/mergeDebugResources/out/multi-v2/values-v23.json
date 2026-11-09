@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.voiceagent.automation.app-mergeDebugResources-60:/values-v23/values-v23.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\CYBER-TECH\\.gradle\\caches\\9.4.1\\transforms\\7197a92cd2ee89d0037af276f721fdbc\\transformed\\work-runtime-2.9.0\\res\\values-v23\\values-v23.xml",
+                    "from": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,121",
+                        "endColumns": "65,62",
+                        "endOffsets": "116,179"
+                    }
+                }
+            ]
+        }
+    ]
+}

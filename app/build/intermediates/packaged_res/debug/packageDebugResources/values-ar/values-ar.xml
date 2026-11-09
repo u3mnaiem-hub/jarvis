@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_description">تُستخدم خدمة إمكانية الوصول فقط لتنفيذ المهام المتعددة التي تطلبها صوتياً (كالضغط على الأزرار وكتابة النصوص في الخانات المصرح بها والتنقل داخل التطبيقات) وتسجيل خطوات المهام عند بدء وضع التسجيل. تظل كلمات المرور والبيانات الحساسة مشفرة داخل خزينة أندرويد (Keystore)، ولا يتم نقل أي بيانات خاصة لأي جهة خارجية.</string>
+    <string name="accessibility_service_label">خدمة أتمتة المساعد الصوتي (Voice Agent)</string>
+    <string name="accessibility_service_summary">تتيح للمساعد الصوتي تسجيل وتنفيذ الأوامر والمهام المتتالية المصرح بها</string>
+    <string name="action_pause">إيقاف مؤقت</string>
+    <string name="action_resume">استئناف</string>
+    <string name="action_stop">إيقاف</string>
+    <string name="app_name">المساعد الصوتي المؤتمت</string>
+    <string name="nav_create">إنشاء مهمة</string>
+    <string name="nav_history">السجل</string>
+    <string name="nav_home">الرئيسية</string>
+    <string name="nav_my_automations">مهامي</string>
+    <string name="nav_settings">الإعدادات</string>
+    <string name="notification_channel_desc">إشعار يوضح تقدم المهمة وزر الإيقاف الفوري</string>
+    <string name="notification_channel_name">المهمة قيد التنفيذ</string>
+</resources>

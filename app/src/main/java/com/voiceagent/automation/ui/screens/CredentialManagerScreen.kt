@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voiceagent.automation.data.db.VoiceAgentDatabase
@@ -41,7 +42,15 @@ fun CredentialManagerScreen(onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("خزينة كلمات المرور المشفرة (Keystore)") },
+                title = {
+                    Text(
+                        "خزينة كلمات المرور المشفرة",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -53,11 +62,12 @@ fun CredentialManagerScreen(onNavigateBack: () -> Unit) {
             ExtendedFloatingActionButton(
                 onClick = { isAddDialogVisible = true },
                 containerColor = Emerald600,
-                contentColor = Color.White
+                contentColor = Color.White,
+                shape = RoundedCornerShape(14.dp)
             ) {
-                Icon(Icons.Default.Lock, contentDescription = null)
+                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("إضافة كلمة مرور مشفرة", fontWeight = FontWeight.Bold)
+                Text("إضافة كلمة سر", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
             }
         }
     ) { padding ->
@@ -158,15 +168,27 @@ fun CredentialCard(credential: Credential, onDelete: () -> Unit) {
                     Icon(Icons.Default.VpnKey, contentDescription = null, tint = Blue600, modifier = Modifier.size(18.dp))
                 }
                 Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(credential.label, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("المفتاح البرمجي: ${credential.key}", fontSize = 11.5.sp, color = LightTextSecondary)
-                    Text("كلمة المرور: •••••••••••• (مشفرة بـ AES-256)", fontSize = 11.sp, color = Emerald600)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = credential.label,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "المفتاح: ${credential.key}",
+                        fontSize = 11.5.sp,
+                        color = LightTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text("كلمة المرور: •••••••• (مشفرة بـ AES-256)", fontSize = 11.sp, color = Emerald600)
                 }
             }
 
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Red600)
+            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Red600, modifier = Modifier.size(20.dp))
             }
         }
     }

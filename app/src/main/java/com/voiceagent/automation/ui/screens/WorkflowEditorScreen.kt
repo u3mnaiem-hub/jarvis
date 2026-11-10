@@ -2,7 +2,6 @@ package com.voiceagent.automation.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -18,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voiceagent.automation.data.db.VoiceAgentDatabase
@@ -27,6 +27,7 @@ import com.voiceagent.automation.ui.theme.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkflowEditorScreen(
     automationId: String?,
@@ -68,36 +69,52 @@ fun WorkflowEditorScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (automationId == null || automationId == "new") "إنشاء مهمة جديدة" else "تعديل المهمة") },
+                title = {
+                    Text(
+                        if (automationId == null || automationId == "new") "إنشاء مهمة جديدة" else "تعديل المهمة",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        if (name.isBlank()) {
-                            Toast.makeText(context, "يرجى إدخال اسم المهمة", Toast.LENGTH_SHORT).show()
-                            return@IconButton
-                        }
-                        val phrases = voicePhrasesText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-                        val auto = Automation(
-                            id = if (automationId.isNullOrBlank() || automationId == "new") UUID.randomUUID().toString() else automationId,
-                            name = name.trim(),
-                            nameAr = nameAr.trim(),
-                            description = description.trim(),
-                            category = category,
-                            voicePhrases = phrases,
-                            steps = steps.mapIndexed { idx, s -> s.copy(order = idx + 1) },
-                            isFavorite = isFavorite
-                        )
-                        coroutineScope.launch {
-                            db.automationDao().insertOrUpdate(auto)
-                            Toast.makeText(context, "تم حفظ المهمة بنجاح", Toast.LENGTH_SHORT).show()
-                            onNavigateBack()
-                        }
-                    }) {
-                        Icon(Icons.Default.Save, contentDescription = "Save", tint = Emerald600)
+                    Button(
+                        onClick = {
+                            if (name.isBlank()) {
+                                Toast.makeText(context, "يرجى إدخال اسم المهمة", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val phrases = voicePhrasesText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+                            val auto = Automation(
+                                id = if (automationId.isNullOrBlank() || automationId == "new") UUID.randomUUID().toString() else automationId,
+                                name = name.trim(),
+                                nameAr = nameAr.trim(),
+                                description = description.trim(),
+                                category = category,
+                                voicePhrases = phrases,
+                                steps = steps.mapIndexed { idx, s -> s.copy(order = idx + 1) },
+                                isFavorite = isFavorite
+                            )
+                            coroutineScope.launch {
+                                db.automationDao().insertOrUpdate(auto)
+                                Toast.makeText(context, "تم حفظ المهمة بنجاح", Toast.LENGTH_SHORT).show()
+                                onNavigateBack()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = "Save", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("حفظ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             )
@@ -110,11 +127,12 @@ fun WorkflowEditorScreen(
                     isStepDialogVisible = true
                 },
                 containerColor = Blue600,
-                contentColor = Color.White
+                contentColor = Color.White,
+                shape = RoundedCornerShape(14.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = null)
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("إضافة خطوة (Add Step)", fontWeight = FontWeight.Bold)
+                Text("إضافة خطوة", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
     ) { padding ->
@@ -122,19 +140,20 @@ fun WorkflowEditorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 90.dp)
+            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp)
         ) {
-            // Basic Info Cards
+            // Basic Info Card
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("بيانات المهمة الأساسية", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("بيانات المهمة الأساسية", fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
 
                         OutlinedTextField(
                             value = name,
@@ -158,7 +177,7 @@ fun WorkflowEditorScreen(
                             label = { Text("العبارات الصوتية المنشطة (عبارة في كل سطر)") },
                             placeholder = { Text("شغل النت للتلفزيون\nافتح نت الشاشة\nEnable TV internet") },
                             modifier = Modifier.fillMaxWidth(),
-                            minLines = 3
+                            minLines = 2
                         )
 
                         OutlinedTextField(
@@ -179,9 +198,10 @@ fun WorkflowEditorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "خطوات التنفيذ المتتالية (${steps.size})",
+                        text = "خطوات التنفيذ (${steps.size})",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
                     )
                     if (steps.isNotEmpty()) {
                         Button(
@@ -212,7 +232,7 @@ fun WorkflowEditorScreen(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
-                        Box(modifier = Modifier.padding(24.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier.padding(20.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             Text("لا توجد خطوات بعد. اضغط على زر (+ إضافة خطوة) لإضافة أول إجراء.", color = LightTextSecondary, fontSize = 12.sp)
                         }
                     }
@@ -286,73 +306,98 @@ fun StepItemCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Step Number Badge
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Blue100),
-                contentAlignment = Alignment.Center
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Header Row: Step Number + Title + Action Badge (Full width, no squeezed controls!)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("${index + 1}", fontWeight = FontWeight.Bold, color = Blue600, fontSize = 12.sp)
-            }
-
-            Spacer(modifier = Modifier.width(10.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Badge(containerColor = Emerald100) {
-                        Text(step.actionType.labelEn, color = Emerald600, fontSize = 10.sp)
-                    }
-                    if (step.delayAfterMs > 0) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("⏳ ${step.delayAfterMs}ms", fontSize = 10.sp, color = LightTextSecondary)
-                    }
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(Blue100),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("${index + 1}", fontWeight = FontWeight.Bold, color = Blue600, fontSize = 11.5.sp)
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(step.title.ifBlank { step.actionType.labelEn }, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Text(
-                    text = when (step.actionType) {
-                        ActionType.LAUNCH_APP -> "App: ${step.targetPackage ?: "None"}"
-                        ActionType.OPEN_URL -> "URL: ${step.url ?: "None"}"
-                        ActionType.SET_TEXT -> "Text: \"${step.textPayload ?: ""}\""
-                        ActionType.INJECT_CREDENTIAL -> "Keystore Password Key: ${step.credentialKey ?: "None"}"
-                        ActionType.CLICK_ELEMENT -> "Target: ${step.selectorText ?: step.selectorResourceId ?: "Coords"}"
-                        ActionType.WAIT_FOR_ELEMENT -> "Wait for: ${step.selectorText ?: step.selectorResourceId}"
-                        ActionType.SPEAK_TEXT -> "Speak: \"${step.textPayload ?: ""}\""
-                        else -> step.description
-                    },
-                    fontSize = 11.5.sp,
-                    color = LightTextSecondary,
-                    maxLines = 1
+                    text = step.title.ifBlank { step.actionType.labelEn },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.5.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Badge(containerColor = Emerald100) {
+                    Text(step.actionType.labelEn, color = Emerald600, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
-            // Move and Delete controls
-            Row {
-                if (onMoveUp != null) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.ArrowUpward, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Detail line
+            Text(
+                text = when (step.actionType) {
+                    ActionType.LAUNCH_APP -> "App: ${step.targetPackage ?: "None"}"
+                    ActionType.OPEN_URL -> "URL: ${step.url ?: "None"}"
+                    ActionType.SET_TEXT -> "Text: \"${step.textPayload ?: ""}\""
+                    ActionType.INJECT_CREDENTIAL -> "Keystore Key: ${step.credentialKey ?: "None"}"
+                    ActionType.CLICK_ELEMENT -> "Target: ${step.selectorText ?: step.selectorResourceId ?: "Coords"}"
+                    ActionType.WAIT_FOR_ELEMENT -> "Wait: ${step.selectorText ?: step.selectorResourceId}"
+                    ActionType.SPEAK_TEXT -> "Speak: \"${step.textPayload ?: ""}\""
+                    else -> step.description
+                },
+                fontSize = 11.5.sp,
+                color = LightTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Divider(modifier = Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+
+            // Dedicated Actions Row (Up, Down, Edit, Delete) - Never cut off!
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (step.delayAfterMs > 0) {
+                        Text("⏳ ${step.delayAfterMs}ms", fontSize = 10.5.sp, color = LightTextSecondary)
                     }
                 }
-                if (onMoveDown != null) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.ArrowDownward, contentDescription = null, modifier = Modifier.size(16.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (onMoveUp != null) {
+                        IconButton(onClick = onMoveUp, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = "Move up", modifier = Modifier.size(16.dp))
+                        }
                     }
-                }
-                IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = null, tint = Blue600, modifier = Modifier.size(16.dp))
-                }
-                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Red600, modifier = Modifier.size(16.dp))
+                    if (onMoveDown != null) {
+                        IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.ArrowDownward, contentDescription = "Move down", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Blue600, modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Red600, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
@@ -380,9 +425,14 @@ fun StepEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("تعديل الخطوة (Edit Step)", fontWeight = FontWeight.Bold) },
+        title = { Text("تعديل الخطوة (Edit Step)", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
         text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 item {
                     OutlinedTextField(
                         value = title,
@@ -397,9 +447,15 @@ fun StepEditorDialog(
                     Box(modifier = Modifier.fillMaxWidth()) {
                         OutlinedButton(
                             onClick = { expandedTypeDropdown = true },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("نوع الإجراء: ${selectedActionType.labelEn} (${selectedActionType.labelAr})")
+                            Text(
+                                "الإجراء: ${selectedActionType.labelEn} (${selectedActionType.labelAr})",
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         DropdownMenu(
                             expanded = expandedTypeDropdown,
@@ -407,7 +463,7 @@ fun StepEditorDialog(
                         ) {
                             ActionType.values().forEach { action ->
                                 DropdownMenuItem(
-                                    text = { Text("${action.labelEn} - ${action.labelAr}") },
+                                    text = { Text("${action.labelEn} - ${action.labelAr}", fontSize = 12.sp) },
                                     onClick = {
                                         selectedActionType = action
                                         expandedTypeDropdown = false
@@ -496,7 +552,7 @@ fun StepEditorDialog(
                         OutlinedTextField(
                             value = timeoutSeconds,
                             onValueChange = { timeoutSeconds = it },
-                            label = { Text("مهلة الفشل (ثواني)") },
+                            label = { Text("مهلة الفشل (s)") },
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -504,27 +560,30 @@ fun StepEditorDialog(
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val updated = initialStep.copy(
-                    title = title.ifBlank { selectedActionType.labelEn },
-                    actionType = selectedActionType,
-                    targetPackage = targetPackage.ifBlank { null },
-                    url = url.ifBlank { null },
-                    selectorText = selectorText.ifBlank { null },
-                    selectorResourceId = selectorResourceId.ifBlank { null },
-                    textPayload = textPayload.ifBlank { null },
-                    credentialKey = credentialKey.ifBlank { null },
-                    delayAfterMs = delayAfterMs.toLongOrNull() ?: 300,
-                    timeoutSeconds = timeoutSeconds.toIntOrNull() ?: 10
-                )
-                onSave(updated)
-            }) {
-                Text("حفظ الخطوة")
+            Button(
+                onClick = {
+                    val updated = initialStep.copy(
+                        title = title.ifBlank { selectedActionType.labelEn },
+                        actionType = selectedActionType,
+                        targetPackage = targetPackage.ifBlank { null },
+                        url = url.ifBlank { null },
+                        selectorText = selectorText.ifBlank { null },
+                        selectorResourceId = selectorResourceId.ifBlank { null },
+                        textPayload = textPayload.ifBlank { null },
+                        credentialKey = credentialKey.ifBlank { null },
+                        delayAfterMs = delayAfterMs.toLongOrNull() ?: 300,
+                        timeoutSeconds = timeoutSeconds.toIntOrNull() ?: 10
+                    )
+                    onSave(updated)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+            ) {
+                Text("حفظ الخطوة", fontSize = 12.sp)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("إلغاء")
+                Text("إلغاء", fontSize = 12.sp)
             }
         }
     )

@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voiceagent.automation.data.db.VoiceAgentDatabase
@@ -40,7 +41,15 @@ fun ExecutionHistoryScreen(onNavigateBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("سجل التنفيذ والتشخيص (History & Logs)") },
+                title = {
+                    Text(
+                        "سجل المهام والتشخيص",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -108,7 +117,10 @@ fun ExecutionLogCard(log: ExecutionLog, dateFormat: SimpleDateFormat) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -124,17 +136,23 @@ fun ExecutionLogCard(log: ExecutionLog, dateFormat: SimpleDateFormat) {
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(log.automationName, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text(dateFormat.format(Date(log.startedAt)), fontSize = 11.5.sp, color = LightTextSecondary)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = log.automationName,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(dateFormat.format(Date(log.startedAt)), fontSize = 11.sp, color = LightTextSecondary)
                     }
                 }
-
+                Spacer(modifier = Modifier.width(6.dp))
                 Badge(containerColor = if (log.isSuccess) Emerald100 else Red100) {
                     Text(
-                        text = if (log.isSuccess) "نجحت بالكامل ✓" else "فشلت ✗",
+                        text = if (log.isSuccess) "نجحت ✓" else "فشلت ✗",
                         color = if (log.isSuccess) Emerald600 else Red600,
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }

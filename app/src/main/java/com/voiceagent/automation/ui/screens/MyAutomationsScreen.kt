@@ -2,7 +2,6 @@ package com.voiceagent.automation.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -16,9 +15,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.gson.Gson
@@ -27,9 +28,9 @@ import com.voiceagent.automation.engine.AutomationExecutionEngine
 import com.voiceagent.automation.model.Automation
 import com.voiceagent.automation.ui.theme.*
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MyAutomationsScreen(
     onNavigateToEdit: (String) -> Unit,
@@ -66,60 +67,74 @@ fun MyAutomationsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = 14.dp)
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Header with Search and Create button
+        // Header with Search and Create buttons (Safe & responsive)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "My Automations",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "مكتبة المهام المؤتمتة (${automations.size})",
-                    fontSize = 12.sp,
+                    fontSize = 11.5.sp,
                     color = LightTextSecondary
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 IconButton(
                     onClick = onNavigateToRecord,
                     modifier = Modifier
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(Red100)
                 ) {
-                    Icon(Icons.Default.FiberManualRecord, contentDescription = "Record", tint = Red600)
+                    Icon(
+                        Icons.Default.FiberManualRecord,
+                        contentDescription = "Record",
+                        tint = Red600,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
                 IconButton(
                     onClick = onNavigateToCreate,
                     modifier = Modifier
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(Emerald100)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Create", tint = Emerald600)
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Create",
+                        tint = Emerald600,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Search text field
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("بحث بالاسم أو العبارة الصوتية...", fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            placeholder = { Text("بحث بالاسم أو العبارة الصوتية...", fontSize = 12.5.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(18.dp))
                     }
                 }
             },
@@ -128,11 +143,11 @@ fun MyAutomationsScreen(
             singleLine = true
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Category filter chips
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             items(categories) { cat ->
@@ -140,7 +155,7 @@ fun MyAutomationsScreen(
                 FilterChip(
                     selected = isSelected,
                     onClick = { selectedCategory = cat },
-                    label = { Text(cat, fontSize = 12.sp) },
+                    label = { Text(cat, fontSize = 11.5.sp) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Emerald600,
                         selectedLabelColor = Color.White
@@ -149,26 +164,26 @@ fun MyAutomationsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // List of Automations
         if (filteredAutomations.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 80.dp),
+                    .padding(bottom = 60.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.SearchOff, contentDescription = null, modifier = Modifier.size(56.dp), tint = LightTextSecondary)
+                    Icon(Icons.Default.SearchOff, contentDescription = null, modifier = Modifier.size(52.dp), tint = LightTextSecondary)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("لا توجد مهام مطابقة للبحث", fontWeight = FontWeight.Bold, color = LightTextSecondary)
                 }
             }
         } else {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 90.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
             ) {
                 items(filteredAutomations, key = { it.id }) { auto ->
                     AutomationCard(
@@ -224,14 +239,16 @@ fun AutomationCard(
     onDelete: () -> Unit,
     onExport: () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            // Top Row: Title, Category pill, and Switch
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Top Row: Icon, Title, Subtitle, and Switch
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -243,7 +260,7 @@ fun AutomationCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(36.dp)
                             .clip(CircleShape)
                             .background(if (automation.isEnabled) Emerald100 else LightSurfaceVariant),
                         contentAlignment = Alignment.Center
@@ -251,35 +268,40 @@ fun AutomationCard(
                         Icon(
                             imageVector = if (automation.category == "Internet & Router") Icons.Default.Router else Icons.Default.Bolt,
                             contentDescription = null,
-                            tint = if (automation.isEnabled) Emerald600 else LightTextSecondary
+                            tint = if (automation.isEnabled) Emerald600 else LightTextSecondary,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = automation.name,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            maxLines = 1
+                            fontSize = 14.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (automation.nameAr.isNotBlank()) {
                             Text(
                                 text = automation.nameAr,
-                                fontSize = 12.sp,
+                                fontSize = 11.5.sp,
                                 color = LightTextSecondary,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
+                Spacer(modifier = Modifier.width(6.dp))
                 Switch(
                     checked = automation.isEnabled,
                     onCheckedChange = onToggle,
-                    colors = SwitchDefaults.colors(checkedThumbColor = Emerald600)
+                    colors = SwitchDefaults.colors(checkedThumbColor = Emerald600),
+                    modifier = Modifier.scale(0.85f)
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Voice Phrase Badges
             if (automation.voicePhrases.isNotEmpty()) {
@@ -290,15 +312,15 @@ fun AutomationCard(
                     items(automation.voicePhrases.take(4)) { phrase ->
                         AssistChip(
                             onClick = {},
-                            label = { Text("🎙️ $phrase", fontSize = 10.5.sp) },
+                            label = { Text("🎙️ $phrase", fontSize = 10.sp, maxLines = 1) },
                             colors = AssistChipDefaults.assistChipColors(containerColor = Blue100)
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
             }
 
-            // Stats row (Steps, Success rate, Last run)
+            // Stats row (Steps & Success rate)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -306,21 +328,21 @@ fun AutomationCard(
             ) {
                 Text(
                     text = "${automation.steps.size} خطوات متتالية",
-                    fontSize = 11.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = LightTextSecondary
                 )
                 Text(
                     text = "نسبة النجاح: ${automation.successRate}%",
-                    fontSize = 11.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (automation.successRate >= 80) Emerald600 else Amber500
                 )
             }
 
-            Divider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.surfaceVariant)
+            Divider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceVariant)
 
-            // Bottom Actions Row: Run, Edit, Duplicate, Delete, Export
+            // Bottom Actions Row: Run Button + Compact Action Buttons (Never cut off!)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -331,25 +353,57 @@ fun AutomationCard(
                     enabled = automation.isEnabled,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("تشغيل (Run)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("تشغيل (Run)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Blue600, modifier = Modifier.size(20.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Blue600, modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = onDuplicate) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = Purple500, modifier = Modifier.size(20.dp))
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Red600, modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = onExport) {
-                        Icon(Icons.Default.Share, contentDescription = "Export", tint = LightTextSecondary, modifier = Modifier.size(20.dp))
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Red600, modifier = Modifier.size(20.dp))
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More", tint = LightTextSecondary, modifier = Modifier.size(18.dp))
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("تكرار المهمة (Duplicate)", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Purple500) },
+                                onClick = {
+                                    showMenu = false
+                                    onDuplicate()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("تصدير ومشاركة (Export)", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Blue600) },
+                                onClick = {
+                                    showMenu = false
+                                    onExport()
+                                }
+                            )
+                        }
                     }
                 }
             }

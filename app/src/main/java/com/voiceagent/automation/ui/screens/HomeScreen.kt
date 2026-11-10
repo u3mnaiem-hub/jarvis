@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -168,7 +169,7 @@ fun HomeScreen(
             }
         }
 
-        // Active Execution Banner
+        // Active Execution Banner (Mobile-Optimized & Never Cut Off)
         if (executionState is ExecutionState.Running) {
             val running = executionState as ExecutionState.Running
             item {
@@ -177,37 +178,57 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .padding(bottom = 16.dp),
                     colors = CardDefaults.cardColors(containerColor = Amber100),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Amber500)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.5.dp,
+                                    color = Amber500
+                                )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "جاري تنفيذ: ${running.automation.name}",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
+                                    fontSize = 13.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
+                            Spacer(modifier = Modifier.width(8.dp))
                             Button(
                                 onClick = { AutomationExecutionEngine.requestStop() },
                                 colors = ButtonDefaults.buttonColors(containerColor = Red600),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("إيقاف (Stop)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    Icons.Default.Stop,
+                                    contentDescription = "Stop",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("إيقاف (Stop)", fontSize = 11.5.sp, fontWeight = FontWeight.Black)
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "الخطوة ${running.currentStepIndex + 1} من ${running.totalSteps}: ${running.currentStep.title}",
-                            fontSize = 12.sp,
-                            color = LightTextSecondary
+                            fontSize = 11.5.sp,
+                            color = LightTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         LinearProgressIndicator(
                             progress = (running.currentStepIndex + 1).toFloat() / running.totalSteps,
@@ -510,10 +531,12 @@ fun HomeScreen(
             }
         }
 
-        // Quick Action Buttons
+        // Quick Action Buttons (Compact & Responsive on all screen widths)
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
@@ -521,21 +544,21 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue600),
-                    contentPadding = PaddingValues(vertical = 12.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("إنشاء مهمة جديدة", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("مهمة جديدة", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = onNavigateToMyAutomations,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
                 ) {
-                    Icon(Icons.Default.List, contentDescription = null)
+                    Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("قائمة المهام", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("قائمة المهام", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
         }

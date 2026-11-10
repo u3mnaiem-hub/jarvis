@@ -47,7 +47,15 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("الإعدادات والصلاحيات (Settings)") },
+                title = {
+                    Text(
+                        "الإعدادات والصلاحيات",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -169,22 +177,31 @@ fun SettingsScreen(
                     Divider(color = MaterialTheme.colorScheme.surfaceVariant)
 
                     Text("لهجة التعرف الصوتي الافتراضية:", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = selectedLanguage == "ar-EG",
-                            onClick = { selectedLanguage = "ar-EG" },
-                            label = { Text("عربي (مصر) 🇪🇬") }
-                        )
-                        FilterChip(
-                            selected = selectedLanguage == "ar-SA",
-                            onClick = { selectedLanguage = "ar-SA" },
-                            label = { Text("عربي فصحى 🇸🇦") }
-                        )
-                        FilterChip(
-                            selected = selectedLanguage == "en-US",
-                            onClick = { selectedLanguage = "en-US" },
-                            label = { Text("English 🇺🇸") }
-                        )
+                    androidx.compose.foundation.lazy.LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = selectedLanguage == "ar-EG",
+                                onClick = { selectedLanguage = "ar-EG" },
+                                label = { Text("مصر 🇪🇬", fontSize = 12.sp) }
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = selectedLanguage == "ar-SA",
+                                onClick = { selectedLanguage = "ar-SA" },
+                                label = { Text("فصحى 🇸🇦", fontSize = 12.sp) }
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = selectedLanguage == "en-US",
+                                onClick = { selectedLanguage = "en-US" },
+                                label = { Text("English 🇺🇸", fontSize = 12.sp) }
+                            )
+                        }
                     }
                 }
             }

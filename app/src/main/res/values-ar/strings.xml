@@ -1,11 +1,12 @@
 <resources>
-    <string name="app_name">المساعد الصوتي المؤتمت</string>
-    <string name="accessibility_service_label">خدمة أتمتة المساعد الصوتي (Voice Agent)</string>
-    <string name="accessibility_service_summary">تتيح للمساعد الصوتي تسجيل وتنفيذ الأوامر والمهام المتتالية المصرح بها</string>
+    <string name="app_name">جارفيس فاينانس</string>
+    <string name="accessibility_service_label">خدمة أتمتة جارفيس فاينانس</string>
+    <string name="accessibility_service_summary">تتيح لجارفيس فاينانس تسجيل وتنفيذ الأوامر والمهام المتتالية المصرح بها</string>
     <string name="accessibility_service_description">تُستخدم خدمة إمكانية الوصول فقط لتنفيذ المهام المتعددة التي تطلبها صوتياً (كالضغط على الأزرار وكتابة النصوص في الخانات المصرح بها والتنقل داخل التطبيقات) وتسجيل خطوات المهام عند بدء وضع التسجيل. تظل كلمات المرور والبيانات الحساسة مشفرة داخل خزينة أندرويد (Keystore)، ولا يتم نقل أي بيانات خاصة لأي جهة خارجية.</string>
 
     <string name="nav_home">الرئيسية</string>
     <string name="nav_my_automations">المهام</string>
+    <string name="nav_finance">مصروفي</string>
     <string name="nav_create">إضافة</string>
     <string name="nav_history">السجل</string>
     <string name="nav_settings">الإعدادات</string>

@@ -86,6 +86,44 @@ fun HomeScreen(
     LaunchedEffect(voiceState) {
         if (voiceState is VoiceState.Success) {
             val spokenText = (voiceState as VoiceState.Success).recognizedText
+            val lower = spokenText.trim().lowercase()
+
+            // Check if spoken command is a direct expense logging command
+            val isFinanceCommand = lower.contains("سجل مصروف") || lower.contains("سجل مصاريف") ||
+                    lower.contains("أضف مصروف") || lower.contains("اضف مصروف") ||
+                    (lower.startsWith("سجل ") && (lower.contains("جنيه") || lower.any { it.isDigit() }))
+
+            if (isFinanceCommand) {
+                val regex = Regex("(\\d+(?:\\.\\d+)?)")
+                val match = regex.find(lower)
+                val amount = match?.value?.toDoubleOrNull() ?: 0.0
+                if (amount > 0) {
+                    val note = lower.replace(regex, "")
+                        .replace("سجل", "")
+                        .replace("مصروف", "")
+                        .replace("مصاريف", "")
+                        .replace("جنيه", "")
+                        .replace("أضف", "")
+                        .replace("اضف", "")
+                        .trim()
+                    scope.launch {
+                        db.expenseTransactionDao().insertTransaction(
+                            com.voiceagent.automation.model.ExpenseTransaction(
+                                amount = amount,
+                                type = "expense",
+                                category = "عام",
+                                note = note.ifBlank { "مصروف صوتي" }
+                            )
+                        )
+                        com.voiceagent.automation.voice.TextToSpeechManager.speak("تم تسجيل مصروف $amount جنيه بنجاح")
+                    }
+                    matchedAutomation = null
+                    ambiguousOptions = emptyList()
+                    matchConfidenceText = "تم تسجيل المصروف في مصروفي: $amount ج.م (${note.ifBlank { "عام" }})"
+                    return@LaunchedEffect
+                }
+            }
+
             val result = CommandMatchingEngine.matchCommand(spokenText, automations.filter { it.isEnabled })
             when (result) {
                 is MatchResult.ExactMatch -> {

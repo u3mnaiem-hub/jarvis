@@ -1,11 +1,12 @@
 <resources>
-    <string name="app_name">Voice Agent</string>
-    <string name="accessibility_service_label">Voice Agent Automation Service</string>
-    <string name="accessibility_service_summary">Allows Voice Agent to execute and record authorized automations</string>
-    <string name="accessibility_service_description">Voice Agent uses this accessibility service only to perform user-defined multi-step actions (such as tapping buttons, typing text into configured fields, and navigating apps) and to record workflow steps when recording mode is activated. Your sensitive credentials remain encrypted in the Android Keystore, and the service never transmits your personal data.</string>
+    <string name="app_name">Jarvis Finance</string>
+    <string name="accessibility_service_label">Jarvis Finance Automation Service</string>
+    <string name="accessibility_service_summary">Allows Jarvis Finance to execute and record authorized automations</string>
+    <string name="accessibility_service_description">Jarvis Finance uses this accessibility service only to perform user-defined multi-step actions (such as tapping buttons, typing text into configured fields, and navigating apps) and to record workflow steps when recording mode is activated. Your sensitive credentials remain encrypted in the Android Keystore, and the service never transmits your personal data.</string>
 
     <string name="nav_home">Home</string>
-    <string name="nav_my_automations">My Automations</string>
+    <string name="nav_my_automations">Automations</string>
+    <string name="nav_finance">Masrofy</string>
     <string name="nav_create">Create</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>

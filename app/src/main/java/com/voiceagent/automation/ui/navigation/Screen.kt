@@ -3,6 +3,7 @@ package com.voiceagent.automation.ui.navigation
 sealed class Screen(val route: String, val titleEn: String, val titleAr: String) {
     object Home : Screen("home", "Home", "الرئيسية")
     object MyAutomations : Screen("my_automations", "My Automations", "مهامي")
+    object Finance : Screen("finance", "Masrofy Finance", "مصروفي")
     object WorkflowEditor : Screen("workflow_editor/{automationId}", "Edit Workflow", "تعديل المهمة") {
         fun createRoute(automationId: String) = "workflow_editor/$automationId"
     }

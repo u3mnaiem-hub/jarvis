@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
 
                 val bottomNavItems = listOf(
                     BottomNavItem(Screen.Home, Icons.Default.Home, R.string.nav_home),
+                    BottomNavItem(Screen.Finance, Icons.Default.AccountBalanceWallet, R.string.nav_finance),
                     BottomNavItem(Screen.MyAutomations, Icons.Default.SmartToy, R.string.nav_my_automations),
                     BottomNavItem(Screen.CreateWorkflow, Icons.Default.AddCircle, R.string.nav_create),
                     BottomNavItem(Screen.ExecutionHistory, Icons.Default.History, R.string.nav_history),
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
 
                 val showBottomBar = currentRoute in listOf(
                     Screen.Home.route,
+                    Screen.Finance.route,
                     Screen.MyAutomations.route,
                     Screen.ExecutionHistory.route,
                     Screen.Settings.route
@@ -114,6 +116,10 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToFailureDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id)) },
                                 onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) }
                             )
+                        }
+
+                        composable(Screen.Finance.route) {
+                            MasrofyFinanceScreen()
                         }
 
                         composable(Screen.MyAutomations.route) {

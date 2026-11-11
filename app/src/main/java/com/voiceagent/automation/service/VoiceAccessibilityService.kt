@@ -57,8 +57,12 @@ class VoiceAccessibilityService : AccessibilityService() {
                 val desc = source.contentDescription?.toString()
                 val className = source.className?.toString()
 
+                // If clicking an editable input that already has text (e.g. prefilled/autofilled credentials)
+                val isEditable = source.isFocusable && (source.className?.contains("EditText", ignoreCase = true) == true || source.isEditable)
+                val existingText = source.text?.toString()
+
                 val step = AutomationStep(
-                    title = "Click: ${text ?: desc ?: resId ?: className ?: "Button"}",
+                    title = if (isEditable && !existingText.isNullOrBlank()) "Select Field: $existingText" else "Click: ${text ?: desc ?: resId ?: className ?: "Button"}",
                     description = "Clicked in $packageName",
                     actionType = ActionType.CLICK_ELEMENT,
                     targetPackage = packageName,
@@ -66,6 +70,7 @@ class VoiceAccessibilityService : AccessibilityService() {
                     selectorText = text,
                     selectorContentDescription = desc,
                     selectorClassName = className,
+                    textPayload = if (isEditable && !existingText.isNullOrBlank()) existingText else null,
                     clickX = bounds.centerX().toFloat(),
                     clickY = bounds.centerY().toFloat()
                 )
@@ -73,7 +78,8 @@ class VoiceAccessibilityService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 val resId = source.viewIdResourceName
-                val text = event.text.joinToString(" ")
+                // Read source.text first if available (contains full string), otherwise event.text
+                val text = source.text?.toString() ?: event.text.joinToString("")
                 val desc = source.contentDescription?.toString()
 
                 if (text.isNotBlank()) {
@@ -154,10 +160,17 @@ class VoiceAccessibilityService : AccessibilityService() {
             return node
         }
 
-        // 2. Try single text match
+        // 2. Try single text or placeholder match
         if (!text.isNullOrBlank()) {
             val nodeText = node.text?.toString()
+            val hintText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                node.hintText?.toString()
+            } else null
+
             if (nodeText != null && (nodeText.contains(text, ignoreCase = true) || text.contains(nodeText, ignoreCase = true))) {
+                return node
+            }
+            if (hintText != null && (hintText.contains(text, ignoreCase = true) || text.contains(hintText, ignoreCase = true))) {
                 return node
             }
         }
@@ -166,11 +179,18 @@ class VoiceAccessibilityService : AccessibilityService() {
         if (candidateTexts.isNotEmpty()) {
             val nodeText = node.text?.toString()
             val nodeDesc = node.contentDescription?.toString()
+            val hintText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                node.hintText?.toString()
+            } else null
+
             for (cand in candidateTexts) {
                 if (nodeText != null && (nodeText.contains(cand, ignoreCase = true) || cand.contains(nodeText, ignoreCase = true))) {
                     return node
                 }
                 if (nodeDesc != null && (nodeDesc.contains(cand, ignoreCase = true) || cand.contains(nodeDesc, ignoreCase = true))) {
+                    return node
+                }
+                if (hintText != null && (hintText.contains(cand, ignoreCase = true) || cand.contains(hintText, ignoreCase = true))) {
                     return node
                 }
             }
@@ -265,6 +285,55 @@ class VoiceAccessibilityService : AccessibilityService() {
                 onComplete?.invoke(false)
             }
         }, null)
+    }
+
+    /**
+     * Dumps a list of visible elements currently rendered on screen for debugging and trace analysis
+     */
+    fun dumpVisibleScreenNodes(maxItems: Int = 15): List<String> {
+        val result = mutableListOf<String>()
+        val root = rootInActiveWindow
+        if (root != null) {
+            collectVisibleNodeSummary(root, result, maxItems)
+        }
+        if (result.isEmpty()) {
+            try {
+                for (window in windows) {
+                    val wRoot = window.root ?: continue
+                    collectVisibleNodeSummary(wRoot, result, maxItems)
+                    if (result.size >= maxItems) break
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error collecting visible node summary: ${e.message}")
+            }
+        }
+        return result
+    }
+
+    private fun collectVisibleNodeSummary(node: AccessibilityNodeInfo, list: MutableList<String>, max: Int) {
+        if (list.size >= max) return
+        val text = node.text?.toString()?.trim()
+        val desc = node.contentDescription?.toString()?.trim()
+        val resId = node.viewIdResourceName
+        val shortClass = node.className?.toString()?.substringAfterLast('.') ?: "View"
+
+        if (!text.isNullOrBlank() || !desc.isNullOrBlank() || !resId.isNullOrBlank()) {
+            val elementDesc = buildString {
+                append(shortClass)
+                if (!resId.isNullOrBlank()) append(" id=${resId.substringAfterLast('/')}")
+                if (!text.isNullOrBlank()) append(" text=\"${text.take(25)}\"")
+                if (!desc.isNullOrBlank()) append(" desc=\"${desc.take(25)}\"")
+            }
+            if (!list.contains(elementDesc)) {
+                list.add(elementDesc)
+            }
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectVisibleNodeSummary(child, list, max)
+            if (list.size >= max) break
+        }
     }
 
     companion object {

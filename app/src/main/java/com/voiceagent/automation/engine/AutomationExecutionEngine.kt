@@ -351,7 +351,9 @@ object AutomationExecutionEngine {
                 return if (node != null) {
                     StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
                 } else {
-                    StepResult(false, "Element '${step.selectorText ?: step.selectorResourceId ?: step.candidateTexts.joinToString()}' not found within timeout", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                    val snapshot = service.dumpVisibleScreenNodes()
+                    val snapInfo = if (snapshot.isNotEmpty()) "\nVisible elements on screen: " + snapshot.joinToString(" | ") else ""
+                    StepResult(false, "Element '${step.selectorText ?: step.selectorResourceId ?: step.candidateTexts.joinToString()}' not found within timeout.$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
                 }
             }
 
@@ -370,7 +372,9 @@ object AutomationExecutionEngine {
                     return StepResult(true, elementFound = false, actionAttempted = true, actionConfirmed = true)
                 }
                 val label = step.selectorText ?: step.selectorResourceId ?: step.candidateTexts.joinToString("/") ?: "Button"
-                return StepResult(false, "Target element '$label' could not be found to click", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                val snapshot = service.dumpVisibleScreenNodes()
+                val snapInfo = if (snapshot.isNotEmpty()) "\n[Diagnostic] Visible elements on screen were: " + snapshot.joinToString(" | ") else ""
+                return StepResult(false, "Target element '$label' could not be found to click.$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
             }
 
             ActionType.CLICK_COORDINATE -> {
@@ -384,7 +388,12 @@ object AutomationExecutionEngine {
 
             ActionType.SET_TEXT -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
-                val node = waitForNode(service, step) ?: return StepResult(false, "Input field '${step.selectorText ?: step.selectorResourceId}' not found", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                val node = waitForNode(service, step)
+                if (node == null) {
+                    val snapshot = service.dumpVisibleScreenNodes()
+                    val snapInfo = if (snapshot.isNotEmpty()) "\n[Diagnostic] Visible elements on screen were: " + snapshot.joinToString(" | ") else ""
+                    return StepResult(false, "Input field '${step.selectorText ?: step.selectorResourceId}' not found.$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                }
                 val text = step.textPayload ?: ""
                 val success = service.setTextOnNode(node, text)
                 return StepResult(success, if (success) null else "Failed to enter text on node", elementFound = true, actionAttempted = true, actionConfirmed = success)
@@ -395,7 +404,12 @@ object AutomationExecutionEngine {
                 val key = step.credentialKey ?: return StepResult(false, "Credential key is not specified", actionAttempted = false, elementFound = false)
                 val cred = db.credentialDao().getCredentialByKey(key) ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
                 val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
-                val node = waitForNode(service, step) ?: return StepResult(false, "Password input field not found", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                val node = waitForNode(service, step)
+                if (node == null) {
+                    val snapshot = service.dumpVisibleScreenNodes()
+                    val snapInfo = if (snapshot.isNotEmpty()) "\n[Diagnostic] Visible elements on screen were: " + snapshot.joinToString(" | ") else ""
+                    return StepResult(false, "Password input field not found.$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                }
                 val success = service.setTextOnNode(node, decryptedPassword)
                 db.credentialDao().updateLastUsed(key, System.currentTimeMillis())
                 return StepResult(success, if (success) null else "Failed to inject password into input field", elementFound = true, actionAttempted = true, actionConfirmed = success)

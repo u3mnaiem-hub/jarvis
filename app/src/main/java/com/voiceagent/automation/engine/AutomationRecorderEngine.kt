@@ -68,8 +68,29 @@ object AutomationRecorderEngine {
         val nextOrder = currentList.size + 1
         val indexedStep = step.copy(order = nextOrder)
 
-        // Deduplicate rapid duplicate clicks on the exact same element within 400ms
         val lastStep = currentList.lastOrNull()
+
+        // 1. Merge sequential text typing on the same field instead of 1-letter steps
+        if (indexedStep.actionType == com.voiceagent.automation.model.ActionType.SET_TEXT &&
+            lastStep != null && lastStep.actionType == com.voiceagent.automation.model.ActionType.SET_TEXT
+        ) {
+            val isSameField = (indexedStep.selectorResourceId != null && indexedStep.selectorResourceId == lastStep.selectorResourceId) ||
+                    (indexedStep.targetPackage == lastStep.targetPackage &&
+                            Math.abs((indexedStep.clickX ?: 0f) - (lastStep.clickX ?: 0f)) < 80f &&
+                            Math.abs((indexedStep.clickY ?: 0f) - (lastStep.clickY ?: 0f)) < 80f)
+
+            if (isSameField) {
+                currentList[currentList.size - 1] = lastStep.copy(
+                    textPayload = indexedStep.textPayload,
+                    title = "Type: ${indexedStep.textPayload}"
+                )
+                _recordedStepsFlow.value = currentList
+                Log.d(TAG, "Aggregated typing step #${lastStep.order}: ${indexedStep.textPayload}")
+                return
+            }
+        }
+
+        // 2. Deduplicate rapid duplicate clicks on the exact same element within 400ms
         if (lastStep != null &&
             lastStep.actionType == indexedStep.actionType &&
             lastStep.selectorResourceId == indexedStep.selectorResourceId &&

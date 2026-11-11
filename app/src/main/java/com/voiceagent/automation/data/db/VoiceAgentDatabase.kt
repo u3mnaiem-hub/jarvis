@@ -8,10 +8,11 @@ import androidx.room.TypeConverters
 import com.voiceagent.automation.model.Automation
 import com.voiceagent.automation.model.Credential
 import com.voiceagent.automation.model.ExecutionLog
+import com.voiceagent.automation.model.ExpenseTransaction
 
 @Database(
-    entities = [Automation::class, ExecutionLog::class, Credential::class],
-    version = 1,
+    entities = [Automation::class, ExecutionLog::class, Credential::class, ExpenseTransaction::class],
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -19,6 +20,7 @@ abstract class VoiceAgentDatabase : RoomDatabase() {
     abstract fun automationDao(): AutomationDao
     abstract fun executionLogDao(): ExecutionLogDao
     abstract fun credentialDao(): CredentialDao
+    abstract fun expenseTransactionDao(): ExpenseTransactionDao
 
     companion object {
         @Volatile

@@ -50,7 +50,11 @@ fun HomeScreen(
     onNavigateToCreate: () -> Unit,
     onNavigateToMyAutomations: () -> Unit,
     onNavigateToHistory: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToBankingProtection: () -> Unit = {},
+    onNavigateToPermissions: () -> Unit = {},
+    onNavigateToFailureDetails: (String) -> Unit = {},
+    onNavigateToBackup: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -130,41 +134,49 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         contentPadding = PaddingValues(top = 16.dp, bottom = 90.dp)
     ) {
-        // Accessibility Permission Notice if disabled
-        if (!isServiceConnected) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp)
-                        .clickable {
-                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                            context.startActivity(intent)
-                        },
-                    colors = CardDefaults.cardColors(containerColor = Red100),
-                    shape = RoundedCornerShape(14.dp)
+        // Banking Protection & Safe Mode Header Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp)
+                    .clickable { onNavigateToBankingProtection() },
+                colors = CardDefaults.cardColors(containerColor = Emerald50),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Emerald600),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = Red600, modifier = Modifier.size(28.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "تفعيل خدمة الوصول مطلوب (Accessibility Required)",
+                                text = "حماية إنستاباي والبنوك نشطة",
                                 fontWeight = FontWeight.Bold,
-                                color = Red600,
+                                color = Emerald900,
                                 fontSize = 13.sp
                             )
-                            Text(
-                                text = "اضغط هنا لتفعيل Voice Agent في إعدادات الهاتف لتنفيذ الأوامر تلقائياً.",
-                                color = LightTextSecondary,
-                                fontSize = 11.5.sp
-                            )
+                            Surface(color = Emerald600, shape = RoundedCornerShape(4.dp)) {
+                                Text("Safe Mode", color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                            }
                         }
-                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Red600)
+                        Text(
+                            text = "الأوامر والربط المباشر مع مصروفي تعمل بأمان تام دون المساس بتطبيقات البنوك.",
+                            color = Slate600,
+                            fontSize = 11.sp
+                        )
                     }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Emerald700)
                 }
             }
         }
@@ -466,6 +478,20 @@ fun HomeScreen(
                             }
                         }
                     }
+                    if (!latestLog!!.isSuccess) {
+                        Button(
+                            onClick = { onNavigateToFailureDetails(latestLog!!.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                        ) {
+                            Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("عرض تفاصيل الفشل والتشخيص (Failure Details)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -524,6 +550,20 @@ fun HomeScreen(
                                 fontSize = 11.5.sp,
                                 color = LightTextSecondary
                             )
+                        }
+                    }
+                    if (!latestLog!!.isSuccess) {
+                        Button(
+                            onClick = { onNavigateToFailureDetails(latestLog!!.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                        ) {
+                            Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("عرض تفاصيل الفشل والتشخيص (Failure Details)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

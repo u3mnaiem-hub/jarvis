@@ -108,7 +108,11 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToCreate = { navController.navigate("workflow_editor/new") },
                                 onNavigateToMyAutomations = { navController.navigate(Screen.MyAutomations.route) },
                                 onNavigateToHistory = { navController.navigate(Screen.ExecutionHistory.route) },
-                                onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
+                                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
+                                onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route) },
+                                onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route) },
+                                onNavigateToFailureDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id)) },
+                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) }
                             )
                         }
 
@@ -143,6 +147,36 @@ class MainActivity : ComponentActivity() {
 
                         composable(Screen.ExecutionHistory.route) {
                             ExecutionHistoryScreen(
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id)) }
+                            )
+                        }
+
+                        composable(
+                            route = Screen.FailureDetails.route,
+                            arguments = listOf(navArgument("logId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val logId = backStackEntry.arguments?.getString("logId") ?: "latest"
+                            FailureDetailsScreen(
+                                logId = logId,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(Screen.BankingProtection.route) {
+                            BankingProtectionScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(Screen.PermissionsDashboard.route) {
+                            PermissionsDashboardScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+
+                        composable(Screen.WorkflowBackup.route) {
+                            WorkflowBackupScreen(
                                 onNavigateBack = { navController.popBackStack() }
                             )
                         }
@@ -156,6 +190,9 @@ class MainActivity : ComponentActivity() {
                         composable(Screen.Settings.route) {
                             SettingsScreen(
                                 onNavigateToCredentials = { navController.navigate(Screen.CredentialManager.route) },
+                                onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route) },
+                                onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route) },
+                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) },
                                 onNavigateBack = { navController.popBackStack() }
                             )
                         }

@@ -37,8 +37,14 @@ class VoiceAccessibilityService : AccessibilityService() {
         val eventType = event.eventType
         val packageName = event.packageName?.toString() ?: return
 
-        // Skip events coming from our own Voice Agent app while recording other apps
+        // Skip events coming from our own Voice Agent app
         if (packageName == applicationContext.packageName) return
+
+        // CRITICAL BANKING PROTECTION: Block any event from financial/banking applications immediately
+        if (com.voiceagent.automation.security.BankingProtectionManager.isPackageProtected(applicationContext, packageName)) {
+            Log.w(TAG, "Banking Protection active: Dropped event from sensitive package $packageName")
+            return
+        }
 
         val source = event.source ?: return
         val bounds = Rect()
@@ -110,10 +116,29 @@ class VoiceAccessibilityService : AccessibilityService() {
         resourceId: String? = null,
         text: String? = null,
         contentDesc: String? = null,
-        className: String? = null
+        className: String? = null,
+        candidateTexts: List<String> = emptyList()
     ): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
-        return searchNodeRecursively(root, resourceId, text, contentDesc, className)
+        // First attempt with rootInActiveWindow
+        val root = rootInActiveWindow
+        if (root != null) {
+            val found = searchNodeRecursively(root, resourceId, text, contentDesc, className, candidateTexts)
+            if (found != null) return found
+        }
+
+        // Secondary attempt: inspect interactive windows list (crucial for GeckoView / Firefox)
+        try {
+            val currentWindows = windows
+            for (window in currentWindows) {
+                val windowRoot = window.root ?: continue
+                val found = searchNodeRecursively(windowRoot, resourceId, text, contentDesc, className, candidateTexts)
+                if (found != null) return found
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error traversing interactive windows: ${e.message}")
+        }
+
+        return null
     }
 
     private fun searchNodeRecursively(
@@ -121,22 +146,37 @@ class VoiceAccessibilityService : AccessibilityService() {
         resId: String?,
         text: String?,
         contentDesc: String?,
-        className: String?
+        className: String?,
+        candidateTexts: List<String> = emptyList()
     ): AccessibilityNodeInfo? {
         // 1. Try resource ID exact match
         if (!resId.isNullOrBlank() && node.viewIdResourceName?.equals(resId, ignoreCase = true) == true) {
             return node
         }
 
-        // 2. Try text match (case-insensitive substring)
+        // 2. Try single text match
         if (!text.isNullOrBlank()) {
             val nodeText = node.text?.toString()
-            if (nodeText != null && nodeText.contains(text, ignoreCase = true)) {
+            if (nodeText != null && (nodeText.contains(text, ignoreCase = true) || text.contains(nodeText, ignoreCase = true))) {
                 return node
             }
         }
 
-        // 3. Try content description
+        // 3. Try multi-candidate text matches (e.g. ["Login", "Log in", "Sign in", "تسجيل الدخول", "دخول"])
+        if (candidateTexts.isNotEmpty()) {
+            val nodeText = node.text?.toString()
+            val nodeDesc = node.contentDescription?.toString()
+            for (cand in candidateTexts) {
+                if (nodeText != null && (nodeText.contains(cand, ignoreCase = true) || cand.contains(nodeText, ignoreCase = true))) {
+                    return node
+                }
+                if (nodeDesc != null && (nodeDesc.contains(cand, ignoreCase = true) || cand.contains(nodeDesc, ignoreCase = true))) {
+                    return node
+                }
+            }
+        }
+
+        // 4. Try content description
         if (!contentDesc.isNullOrBlank()) {
             val nodeDesc = node.contentDescription?.toString()
             if (nodeDesc != null && nodeDesc.contains(contentDesc, ignoreCase = true)) {
@@ -144,8 +184,8 @@ class VoiceAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 4. Try class name if no other specific filter
-        if (resId.isNullOrBlank() && text.isNullOrBlank() && contentDesc.isNullOrBlank() && !className.isNullOrBlank()) {
+        // 5. Try class name if no other specific filter
+        if (resId.isNullOrBlank() && text.isNullOrBlank() && contentDesc.isNullOrBlank() && candidateTexts.isEmpty() && !className.isNullOrBlank()) {
             if (node.className?.toString()?.equals(className, ignoreCase = true) == true) {
                 return node
             }
@@ -154,7 +194,7 @@ class VoiceAccessibilityService : AccessibilityService() {
         // Recurse children
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            val found = searchNodeRecursively(child, resId, text, contentDesc, className)
+            val found = searchNodeRecursively(child, resId, text, contentDesc, className, candidateTexts)
             if (found != null) return found
         }
 

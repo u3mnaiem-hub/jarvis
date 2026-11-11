@@ -40,6 +40,7 @@ fun RecorderScreen(
     val db = remember { VoiceAgentDatabase.getInstance(context) }
 
     val isRecording by AutomationRecorderEngine.isRecordingFlow.collectAsState()
+    val isPaused by AutomationRecorderEngine.isPausedFlow.collectAsState()
     val recordedSteps by AutomationRecorderEngine.recordedStepsFlow.collectAsState()
     val isServiceConnected by VoiceAccessibilityService.isServiceConnected.collectAsState()
 
@@ -81,35 +82,60 @@ fun RecorderScreen(
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Start / Stop Recording Button
-                    Button(
-                        onClick = {
-                            if (isRecording) {
-                                AutomationRecorderEngine.stopRecording()
-                            } else {
-                                AutomationRecorderEngine.startRecording(workflowName.ifBlank { "Recorded Workflow" })
+                    // Start / Pause / Resume / Stop Recording Controls
+                    if (isRecording) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (isPaused) {
+                                        AutomationRecorderEngine.resumeRecording()
+                                    } else {
+                                        AutomationRecorderEngine.pauseRecording()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isPaused) Amber600 else Slate700
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(
+                                    if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                    contentDescription = null,
+                                    tint = Color.White
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (isPaused) "استئناف" else "إيقاف مؤقت", fontWeight = FontWeight.Bold)
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isRecording) Red600 else Emerald600
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isRecording) "إيقاف التسجيل فوراً (STOP)" else "بدء تسجيل الشاشة الآن",
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+
+                            Button(
+                                onClick = { AutomationRecorderEngine.stopRecording() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Red600),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White)
+                                Spacer(Modifier.width(6.dp))
+                                Text("إنهاء وحفظ", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                AutomationRecorderEngine.startRecording(workflowName.ifBlank { "Recorded Workflow" })
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.FiberManualRecord, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("بدء تسجيل الشاشة الآن", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
 
                     // Actions Row: Manual Step + Save

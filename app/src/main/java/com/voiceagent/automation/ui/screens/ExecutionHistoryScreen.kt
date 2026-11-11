@@ -30,7 +30,10 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun ExecutionHistoryScreen(onNavigateBack: () -> Unit) {
+fun ExecutionHistoryScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToDetails: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val db = remember { VoiceAgentDatabase.getInstance(context) }
@@ -92,7 +95,11 @@ fun ExecutionHistoryScreen(onNavigateBack: () -> Unit) {
                 contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
             ) {
                 items(logs, key = { it.id }) { log ->
-                    ExecutionLogCard(log = log, dateFormat = dateFormat)
+                    ExecutionLogCard(
+                        log = log,
+                        dateFormat = dateFormat,
+                        onViewDetails = { onNavigateToDetails(log.id) }
+                    )
                 }
             }
         }
@@ -100,7 +107,11 @@ fun ExecutionHistoryScreen(onNavigateBack: () -> Unit) {
 }
 
 @Composable
-fun ExecutionLogCard(log: ExecutionLog, dateFormat: SimpleDateFormat) {
+fun ExecutionLogCard(
+    log: ExecutionLog,
+    dateFormat: SimpleDateFormat,
+    onViewDetails: () -> Unit = {}
+) {
     var isExpanded by remember { mutableStateOf(false) }
 
     Card(
@@ -175,6 +186,18 @@ fun ExecutionLogCard(log: ExecutionLog, dateFormat: SimpleDateFormat) {
                     color = Red600,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+
+            OutlinedButton(
+                onClick = onViewDetails,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("تقرير التشخيص وتفاصيل الفشل (Diagnostics)", fontSize = 11.5.sp)
             }
 
             // Expand / Collapse Chevron indicator

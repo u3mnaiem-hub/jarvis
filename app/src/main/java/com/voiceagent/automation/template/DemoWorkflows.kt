@@ -7,19 +7,18 @@ import com.voiceagent.automation.model.AutomationStep
 object DemoWorkflows {
 
     /**
-     * Pre-configured, fully editable demonstration workflow for Router Parental Control & TV Internet
+     * Pre-configured, fully editable demonstration workflow for Router Parental Control & TV Internet.
+     * Compatible with Firefox saved passwords (where Username and Password are automatically pre-populated).
      */
     fun createEnableTvInternetWorkflow(
         routerIp: String = "192.168.1.1",
-        routerUsername: String = "admin",
-        deviceName: String = "Smart-TV",
-        credentialKey: String = "router_admin_pass"
+        deviceName: String = "Smart-TV"
     ): Automation {
         return Automation(
             id = "demo_enable_tv_internet",
             name = "Enable TV Internet",
             nameAr = "تشغيل الإنترنت للتلفزيون",
-            description = "Opens Firefox, logs into router ($routerIp), navigates to Parental Control, enables $deviceName internet access, and verifies.",
+            description = "Opens Firefox, navigates to router ($routerIp), clicks Login with Firefox pre-saved credentials, navigates to Parental Control, enables $deviceName internet access, and verifies.",
             category = "Internet & Router",
             iconName = "router",
             isFavorite = true,
@@ -37,7 +36,7 @@ object DemoWorkflows {
             steps = listOf(
                 AutomationStep(
                     order = 1,
-                    title = "Launch Browser (Firefox)",
+                    title = "Launch Firefox Browser",
                     description = "Opens Firefox to connect to router",
                     actionType = ActionType.LAUNCH_APP,
                     targetPackage = "org.mozilla.firefox",
@@ -51,204 +50,220 @@ object DemoWorkflows {
                     actionType = ActionType.OPEN_URL,
                     targetPackage = "org.mozilla.firefox",
                     url = "http://$routerIp",
-                    delayAfterMs = 1500,
-                    spokenMessage = "Navigating to router address"
+                    delayAfterMs = 2000,
+                    spokenMessage = "Opening router page"
                 ),
                 AutomationStep(
                     order = 3,
-                    title = "Wait for Router Login Screen",
-                    description = "Checks that login page is loaded",
-                    actionType = ActionType.WAIT_FOR_ELEMENT,
-                    selectorText = "Login",
-                    selectorResourceId = "login_button",
-                    timeoutSeconds = 12
-                ),
-                AutomationStep(
-                    order = 4,
-                    title = "Locate & Enter Username",
-                    description = "Enters router admin username",
-                    actionType = ActionType.SET_TEXT,
-                    selectorResourceId = "username",
-                    selectorText = "Username",
-                    textPayload = routerUsername,
-                    delayAfterMs = 300
-                ),
-                AutomationStep(
-                    order = 5,
-                    title = "Retrieve & Inject Password from Keystore",
-                    description = "Injects encrypted router password into password field",
-                    actionType = ActionType.INJECT_CREDENTIAL,
-                    selectorResourceId = "password",
-                    selectorText = "Password",
-                    credentialKey = credentialKey,
-                    delayAfterMs = 300
-                ),
-                AutomationStep(
-                    order = 6,
-                    title = "Press Login Button",
-                    description = "Submits login credentials",
+                    title = "Detect & Click Router Login Button",
+                    description = "Clicks Login button using Firefox pre-populated credentials",
                     actionType = ActionType.CLICK_ELEMENT,
-                    selectorResourceId = "login_button",
+                    targetPackage = "org.mozilla.firefox",
                     selectorText = "Login",
-                    delayAfterMs = 2000,
+                    candidateTexts = listOf("Login", "Log in", "Sign in", "تسجيل الدخول", "دخول"),
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2500,
                     spokenMessage = "Logging into router"
                 ),
                 AutomationStep(
-                    order = 7,
-                    title = "Wait for Successful Dashboard",
-                    description = "Waits for router status dashboard to load",
+                    order = 4,
+                    title = "Verify Router Authentication",
+                    description = "Verifies router authenticated dashboard appears",
                     actionType = ActionType.WAIT_FOR_ELEMENT,
-                    selectorText = "Status",
-                    timeoutSeconds = 15
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Status", "Parental Control", "Settings", "حالة الاتصال", "التحكم الأبوي", "الأجهزة"),
+                    timeoutSeconds = 12
                 ),
                 AutomationStep(
-                    order = 8,
+                    order = 5,
                     title = "Open Parental Control Menu",
                     description = "Navigates to device restriction controls",
                     actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Parental Control",
-                    delayAfterMs = 1000
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Parental Control", "التحكم الأبوي", "Device Management", "إدارة الأجهزة"),
+                    delayAfterMs = 1200
                 ),
                 AutomationStep(
-                    order = 9,
-                    title = "Select Connected Devices",
-                    description = "Opens list of managed devices",
-                    actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Connected Devices",
-                    delayAfterMs = 800
-                ),
-                AutomationStep(
-                    order = 10,
+                    order = 6,
                     title = "Locate Television Device ($deviceName)",
                     description = "Finds $deviceName row in the device list",
                     actionType = ActionType.WAIT_FOR_ELEMENT,
+                    targetPackage = "org.mozilla.firefox",
                     selectorText = deviceName,
-                    timeoutSeconds = 10
+                    timeoutSeconds = 8
                 ),
                 AutomationStep(
-                    order = 11,
-                    title = "Change Internet Access to Enabled",
-                    description = "Toggles internet access permission to Enabled",
+                    order = 7,
+                    title = "Enable TV Internet Access",
+                    description = "Toggles or sets internet access switch to ON",
                     actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Enabled",
-                    delayAfterMs = 500,
-                    spokenMessage = "Enabling television internet"
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Allow", "Enable", "تفعيل", "سماح", "ON"),
+                    delayAfterMs = 1000,
+                    spokenMessage = "Enabling TV internet"
                 ),
                 AutomationStep(
-                    order = 12,
-                    title = "Press Save Settings",
-                    description = "Applies router configuration change",
+                    order = 8,
+                    title = "Save Router Settings",
+                    description = "Applies settings on the router",
                     actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Save",
-                    selectorResourceId = "save_btn",
-                    delayAfterMs = 1500
-                ),
-                AutomationStep(
-                    order = 13,
-                    title = "Verify New Status",
-                    description = "Confirms that $deviceName status is now Enabled",
-                    actionType = ActionType.CHECK_TEXT_EXISTS,
-                    selectorText = "Enabled",
-                    stopOnFailure = true
-                ),
-                AutomationStep(
-                    order = 14,
-                    title = "Announce Completion",
-                    description = "Spoken feedback confirming success",
-                    actionType = ActionType.SPEAK_TEXT,
-                    textPayload = "TV internet has been successfully enabled."
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Apply", "Save", "حفظ", "تطبيق"),
+                    delayAfterMs = 1500,
+                    spokenMessage = "TV internet has been successfully enabled"
                 )
             )
         )
     }
 
     /**
-     * Disable TV Internet Workflow
+     * Disable TV Internet workflow
      */
     fun createDisableTvInternetWorkflow(
         routerIp: String = "192.168.1.1",
-        routerUsername: String = "admin",
-        deviceName: String = "Smart-TV",
-        credentialKey: String = "router_admin_pass"
+        deviceName: String = "Smart-TV"
     ): Automation {
         return Automation(
             id = "demo_disable_tv_internet",
             name = "Disable TV Internet",
             nameAr = "إيقاف الإنترنت عن التلفزيون",
-            description = "Logs into router ($routerIp) and disables $deviceName internet access.",
+            description = "Opens Firefox, logs into router ($routerIp), and blocks internet access for $deviceName.",
             category = "Internet & Router",
-            iconName = "router_off",
-            isFavorite = false,
+            iconName = "block",
+            isFavorite = true,
             isEnabled = true,
             voicePhrases = listOf(
                 "Disable TV internet",
                 "Turn off the TV connection",
                 "Block internet for television",
                 "اقفل النت عن التلفزيون",
-                "عطل الانترنت للشاشة",
+                "اقفل النت عن الشاشة",
                 "افصل نت التلفزيون",
-                "اقفل نت الشاشة"
+                "عطل نت الشاشة",
+                "اقفل نت التي في"
             ),
             steps = listOf(
                 AutomationStep(
                     order = 1,
-                    title = "Launch Browser",
+                    title = "Launch Firefox Browser",
+                    description = "Opens Firefox to connect to router",
                     actionType = ActionType.LAUNCH_APP,
                     targetPackage = "org.mozilla.firefox",
-                    delayAfterMs = 1000
+                    delayAfterMs = 1200,
+                    spokenMessage = "Opening Firefox"
                 ),
                 AutomationStep(
                     order = 2,
-                    title = "Navigate to Router",
+                    title = "Navigate to Router Page",
+                    description = "Navigates to http://$routerIp",
                     actionType = ActionType.OPEN_URL,
                     targetPackage = "org.mozilla.firefox",
                     url = "http://$routerIp",
-                    delayAfterMs = 1500
+                    delayAfterMs = 2000,
+                    spokenMessage = "Opening router page"
                 ),
                 AutomationStep(
                     order = 3,
-                    title = "Inject Router Password",
-                    actionType = ActionType.INJECT_CREDENTIAL,
-                    selectorResourceId = "password",
-                    selectorText = "Password",
-                    credentialKey = credentialKey,
-                    delayAfterMs = 400
+                    title = "Detect & Click Router Login Button",
+                    description = "Clicks Login button using Firefox pre-populated credentials",
+                    actionType = ActionType.CLICK_ELEMENT,
+                    targetPackage = "org.mozilla.firefox",
+                    selectorText = "Login",
+                    candidateTexts = listOf("Login", "Log in", "Sign in", "تسجيل الدخول", "دخول"),
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2500,
+                    spokenMessage = "Logging into router"
                 ),
                 AutomationStep(
                     order = 4,
-                    title = "Click Login",
-                    actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Login",
-                    delayAfterMs = 2000
+                    title = "Verify Router Authentication",
+                    description = "Verifies router authenticated dashboard appears",
+                    actionType = ActionType.WAIT_FOR_ELEMENT,
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Status", "Parental Control", "Settings", "حالة الاتصال", "التحكم الأبوي", "الأجهزة"),
+                    timeoutSeconds = 12
                 ),
                 AutomationStep(
                     order = 5,
-                    title = "Open Parental Control",
+                    title = "Open Parental Control Menu",
+                    description = "Navigates to device restriction controls",
                     actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Parental Control",
-                    delayAfterMs = 1000
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Parental Control", "التحكم الأبوي", "Device Management", "إدارة الأجهزة"),
+                    delayAfterMs = 1200
                 ),
                 AutomationStep(
                     order = 6,
-                    title = "Set TV Access to Disabled",
-                    actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Disabled",
-                    delayAfterMs = 500
+                    title = "Locate Television Device ($deviceName)",
+                    description = "Finds $deviceName row in the device list",
+                    actionType = ActionType.WAIT_FOR_ELEMENT,
+                    targetPackage = "org.mozilla.firefox",
+                    selectorText = deviceName,
+                    timeoutSeconds = 8
                 ),
                 AutomationStep(
                     order = 7,
-                    title = "Save Changes",
+                    title = "Block TV Internet Access",
+                    description = "Toggles or sets internet access switch to Block/Off",
                     actionType = ActionType.CLICK_ELEMENT,
-                    selectorText = "Save",
-                    delayAfterMs = 1500
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Block", "Disable", "حظر", "تعطيل", "OFF"),
+                    delayAfterMs = 1000,
+                    spokenMessage = "Blocking TV internet"
                 ),
                 AutomationStep(
                     order = 8,
-                    title = "Announce Disconnection",
-                    actionType = ActionType.SPEAK_TEXT,
-                    textPayload = "TV internet has been disabled."
+                    title = "Save Router Settings",
+                    description = "Applies settings on the router",
+                    actionType = ActionType.CLICK_ELEMENT,
+                    targetPackage = "org.mozilla.firefox",
+                    candidateTexts = listOf("Apply", "Save", "حفظ", "تطبيق"),
+                    delayAfterMs = 1500,
+                    spokenMessage = "TV internet has been successfully disabled"
                 )
             )
+        )
+    }
+
+    /**
+     * Pre-configured workflow to directly link Voice Agent with Masrofy
+     */
+    fun createMasrofyExpenseWorkflow(): Automation {
+        return Automation(
+            id = "demo_masrofy_expense",
+            name = "Add Expense to Masrofy",
+            nameAr = "تسجيل مصروف في مصروفي",
+            description = "Links Voice Agent directly with Masrofy app to record expenses seamlessly.",
+            category = "Applications",
+            iconName = "account_balance_wallet",
+            isFavorite = true,
+            isEnabled = true,
+            voicePhrases = listOf(
+                "Add expense to masrofy",
+                "Open masrofy",
+                "سجل مصروف في مصروفي",
+                "افتح مصروفي",
+                "سجل مصاريف"
+            ),
+            steps = listOf(
+                AutomationStep(
+                    order = 1,
+                    title = "Launch Masrofy Application",
+                    description = "Opens Masrofy app cleanly",
+                    actionType = ActionType.LAUNCH_APP,
+                    targetPackage = "com.masrofy.app",
+                    delayAfterMs = 1000,
+                    spokenMessage = "Opening Masrofy"
+                )
+            )
+        )
+    }
+
+    fun getAllInitialAutomations(): List<Automation> {
+        return listOf(
+            createEnableTvInternetWorkflow(),
+            createDisableTvInternetWorkflow(),
+            createMasrofyExpenseWorkflow()
         )
     }
 }

@@ -34,6 +34,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onNavigateToCredentials: () -> Unit,
+    onNavigateToBankingProtection: () -> Unit = {},
+    onNavigateToPermissions: () -> Unit = {},
+    onNavigateToBackup: () -> Unit = {},
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -72,6 +75,96 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Banking Protection Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onNavigateToBankingProtection),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Emerald50)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Emerald600),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("حماية التطبيقات البنكية وإنستاباي", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Emerald900)
+                        Text("درع حظر الوصول ومنع إغلاق تطبيقات البنوك والمحافظ", fontSize = 11.5.sp, color = Slate600)
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Emerald700)
+                }
+            }
+
+            // Permissions Dashboard Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onNavigateToPermissions),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Blue100),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = Blue600)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("لوحة تحكم الصلاحيات (Permissions)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("مراجعة وتعديل أذونات الميكروفون والوصول والإشعارات", fontSize = 11.5.sp, color = LightTextSecondary)
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = LightTextSecondary)
+                }
+            }
+
+            // Backup & Restore Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onNavigateToBackup),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Amber100),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Backup, contentDescription = null, tint = Amber700)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("النسخ الاحتياطي والاستيراد (JSON)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("تصدير واستيراد المهام واستعادة الإعدادات الافتراضية", fontSize = 11.5.sp, color = LightTextSecondary)
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = LightTextSecondary)
+                }
+            }
+
             // Accessibility Service Card
             Card(
                 modifier = Modifier

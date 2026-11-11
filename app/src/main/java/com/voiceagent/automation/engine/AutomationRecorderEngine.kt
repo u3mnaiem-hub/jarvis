@@ -12,31 +12,57 @@ object AutomationRecorderEngine {
     private val _isRecordingFlow = MutableStateFlow(false)
     val isRecordingFlow: StateFlow<Boolean> = _isRecordingFlow.asStateFlow()
 
+    private val _isPausedFlow = MutableStateFlow(false)
+    val isPausedFlow: StateFlow<Boolean> = _isPausedFlow.asStateFlow()
+
     private val _recordedStepsFlow = MutableStateFlow<List<AutomationStep>>(emptyList())
     val recordedStepsFlow: StateFlow<List<AutomationStep>> = _recordedStepsFlow.asStateFlow()
 
     val isRecording: Boolean
         get() = _isRecordingFlow.value
 
+    val isPaused: Boolean
+        get() = _isPausedFlow.value
+
+    val isRecordingActive: Boolean
+        get() = _isRecordingFlow.value && !_isPausedFlow.value
+
     fun startRecording(initialTitle: String = "Recorded Automation") {
         Log.i(TAG, "Starting automation recorder: $initialTitle")
         _recordedStepsFlow.value = emptyList()
+        _isPausedFlow.value = false
         _isRecordingFlow.value = true
+    }
+
+    fun pauseRecording() {
+        if (_isRecordingFlow.value) {
+            Log.i(TAG, "Recording paused")
+            _isPausedFlow.value = true
+        }
+    }
+
+    fun resumeRecording() {
+        if (_isRecordingFlow.value) {
+            Log.i(TAG, "Recording resumed")
+            _isPausedFlow.value = false
+        }
     }
 
     fun stopRecording(): List<AutomationStep> {
         Log.i(TAG, "Stopping recorder with ${_recordedStepsFlow.value.size} steps")
         _isRecordingFlow.value = false
+        _isPausedFlow.value = false
         return _recordedStepsFlow.value
     }
 
     fun cancelRecording() {
         _isRecordingFlow.value = false
+        _isPausedFlow.value = false
         _recordedStepsFlow.value = emptyList()
     }
 
     fun addRecordedStep(step: AutomationStep) {
-        if (!_isRecordingFlow.value) return
+        if (!isRecordingActive) return
 
         val currentList = _recordedStepsFlow.value.toMutableList()
         val nextOrder = currentList.size + 1

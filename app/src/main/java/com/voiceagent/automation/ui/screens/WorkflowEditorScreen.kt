@@ -252,6 +252,20 @@ fun WorkflowEditorScreen(
                             mutable.removeAt(index)
                             steps = mutable.mapIndexed { idx, s -> s.copy(order = idx + 1) }
                         },
+                        onDuplicate = {
+                            val mutable = steps.toMutableList()
+                            val duplicate = step.copy(
+                                id = UUID.randomUUID().toString(),
+                                title = "${step.title} (نسخة)"
+                            )
+                            mutable.add(index + 1, duplicate)
+                            steps = mutable.mapIndexed { idx, s -> s.copy(order = idx + 1) }
+                        },
+                        onToggleEnable = {
+                            val mutable = steps.toMutableList()
+                            mutable[index] = step.copy(isStepEnabled = !step.isStepEnabled)
+                            steps = mutable
+                        },
                         onMoveUp = if (index > 0) {
                             {
                                 val mutable = steps.toMutableList()
@@ -301,6 +315,8 @@ fun StepItemCard(
     index: Int,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    onDuplicate: () -> Unit = {},
+    onToggleEnable: () -> Unit = {},
     onMoveUp: (() -> Unit)?,
     onMoveDown: (() -> Unit)?
 ) {
@@ -391,6 +407,17 @@ fun StepItemCard(
                         IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.ArrowDownward, contentDescription = "Move down", modifier = Modifier.size(16.dp))
                         }
+                    }
+                    IconButton(onClick = onToggleEnable, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            if (step.isStepEnabled) Icons.Default.CheckCircle else Icons.Default.RemoveCircleOutline,
+                            contentDescription = "Toggle Enable",
+                            tint = if (step.isStepEnabled) Emerald600 else Slate400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    IconButton(onClick = onDuplicate, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate", tint = Slate700, modifier = Modifier.size(16.dp))
                     }
                     IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Blue600, modifier = Modifier.size(16.dp))

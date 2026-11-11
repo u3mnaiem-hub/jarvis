@@ -8,19 +8,28 @@ data class AutomationStep(
     val title: String = "",
     val description: String = "",
     val actionType: ActionType = ActionType.CLICK_ELEMENT,
+    val isStepEnabled: Boolean = true,
     
     // Application target
     val targetPackage: String? = null,
     val targetActivity: String? = null,
     
-    // Web / URL target
+    // Web / URL / Deep Link target
     val url: String? = null,
+    val deepLinkUri: String? = null,
     
     // Element selectors (Accessibility)
     val selectorResourceId: String? = null,
     val selectorText: String? = null,
     val selectorContentDescription: String? = null,
     val selectorClassName: String? = null,
+    
+    // Semantic / Multi-text candidate matching (e.g. ["Login", "Log in", "تسجيل الدخول", "دخول"])
+    val candidateTexts: List<String> = emptyList(),
+    
+    // Post-action state verification
+    val verificationText: String? = null,
+    val verificationResourceId: String? = null,
     
     // Coordinate fallbacks (x, y)
     val clickX: Float? = null,

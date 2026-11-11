@@ -478,20 +478,6 @@ fun HomeScreen(
                             }
                         }
                     }
-                    if (!latestLog!!.isSuccess) {
-                        Button(
-                            onClick = { onNavigateToFailureDetails(latestLog!!.id) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Red600)
-                        ) {
-                            Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("عرض تفاصيل الفشل والتشخيص (Failure Details)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }

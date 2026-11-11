@@ -15,6 +15,12 @@ interface ExecutionLogDao {
     @Query("SELECT * FROM execution_logs ORDER BY startedAt DESC LIMIT 1")
     fun getLatestLogFlow(): Flow<ExecutionLog?>
 
+    @Query("SELECT * FROM execution_logs WHERE id = :id LIMIT 1")
+    suspend fun getLogById(id: String): ExecutionLog?
+
+    @Query("SELECT * FROM execution_logs ORDER BY startedAt DESC LIMIT 1")
+    suspend fun getLatestLog(): ExecutionLog?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLog(log: ExecutionLog)
 

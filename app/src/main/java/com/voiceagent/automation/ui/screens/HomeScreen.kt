@@ -106,17 +106,15 @@ fun HomeScreen(
                         .replace("أضف", "")
                         .replace("اضف", "")
                         .trim()
-                    scope.launch {
-                        db.expenseTransactionDao().insertTransaction(
-                            com.voiceagent.automation.model.ExpenseTransaction(
-                                amount = amount,
-                                type = "expense",
-                                category = "عام",
-                                note = note.ifBlank { "مصروف صوتي" }
-                            )
+                    db.expenseTransactionDao().insertTransaction(
+                        com.voiceagent.automation.model.ExpenseTransaction(
+                            amount = amount,
+                            type = "expense",
+                            category = "عام",
+                            note = note.ifBlank { "مصروف صوتي" }
                         )
-                        com.voiceagent.automation.voice.TextToSpeechManager.speak("تم تسجيل مصروف $amount جنيه بنجاح")
-                    }
+                    )
+                    com.voiceagent.automation.voice.TextToSpeechManager.speak("تم تسجيل مصروف $amount جنيه بنجاح")
                     matchedAutomation = null
                     ambiguousOptions = emptyList()
                     matchConfidenceText = "تم تسجيل المصروف في مصروفي: $amount ج.م (${note.ifBlank { "عام" }})"

@@ -54,7 +54,8 @@ fun HomeScreen(
     onNavigateToBankingProtection: () -> Unit = {},
     onNavigateToPermissions: () -> Unit = {},
     onNavigateToFailureDetails: (String) -> Unit = {},
-    onNavigateToBackup: () -> Unit = {}
+    onNavigateToBackup: () -> Unit = {},
+    onNavigateToBrowser: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -602,6 +603,17 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
+                    onClick = onNavigateToBrowser,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
+                ) {
+                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("المتصفح المدمج", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+                Button(
                     onClick = onNavigateToCreate,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
@@ -620,7 +632,7 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("قائمة المهام", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("المهام", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
         }

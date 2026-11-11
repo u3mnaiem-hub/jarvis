@@ -308,10 +308,24 @@ object AutomationExecutionEngine {
         when (step.actionType) {
             ActionType.LAUNCH_APP -> {
                 val pkg = step.targetPackage ?: return StepResult(false, "Target package is not specified", actionAttempted = false, elementFound = false)
-                val intent = context.packageManager.getLaunchIntentForPackage(pkg)?.apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                } ?: return StepResult(false, "Application '$pkg' is not installed on this device", actionAttempted = false, elementFound = false)
-                context.startActivity(intent)
+                var launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
+
+                // Fallback for browsers: If requested browser isn't installed, launch the default web browser
+                if (launchIntent == null && (pkg.contains("firefox", ignoreCase = true) || pkg.contains("chrome", ignoreCase = true) || pkg.contains("browser", ignoreCase = true))) {
+                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("http://")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    if (browserIntent.resolveActivity(context.packageManager) != null) {
+                        context.startActivity(browserIntent)
+                        return StepResult(true, actionAttempted = true, actionConfirmed = true)
+                    }
+                }
+
+                if (launchIntent == null) {
+                    return StepResult(false, "Application '$pkg' is not installed on this device", actionAttempted = false, elementFound = false)
+                }
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launchIntent)
                 return StepResult(true, actionAttempted = true, actionConfirmed = true)
             }
 
@@ -324,10 +338,24 @@ object AutomationExecutionEngine {
                 }
                 val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    step.targetPackage?.let { setPackage(it) }
+                    if (!step.targetPackage.isNullOrBlank()) {
+                        val isInstalled = try {
+                            context.packageManager.getPackageInfo(step.targetPackage, 0)
+                            true
+                        } catch (e: Exception) {
+                            false
+                        }
+                        if (isInstalled) {
+                            setPackage(step.targetPackage)
+                        }
+                    }
                 }
-                context.startActivity(intent)
-                return StepResult(true, actionAttempted = true, actionConfirmed = true)
+                try {
+                    context.startActivity(intent)
+                    return StepResult(true, actionAttempted = true, actionConfirmed = true)
+                } catch (e: Exception) {
+                    return StepResult(false, "Failed to open URL '$urlStr': ${e.message}", actionAttempted = true, elementFound = false)
+                }
             }
 
             ActionType.SEND_DEEP_LINK -> {

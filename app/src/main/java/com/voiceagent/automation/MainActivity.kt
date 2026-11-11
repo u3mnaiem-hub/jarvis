@@ -114,12 +114,19 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route) },
                                 onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route) },
                                 onNavigateToFailureDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id)) },
-                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) }
+                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) },
+                                onNavigateToBrowser = { navController.navigate(Screen.Browser.route) }
                             )
                         }
 
                         composable(Screen.Finance.route) {
                             MasrofyFinanceScreen()
+                        }
+
+                        composable(Screen.Browser.route) {
+                            InAppBrowserScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
                         }
 
                         composable(Screen.MyAutomations.route) {

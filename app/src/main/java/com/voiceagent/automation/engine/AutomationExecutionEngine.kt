@@ -587,9 +587,9 @@ object AutomationExecutionEngine {
         }
 
         _executionState.value = if (isSuccess) {
-            ExecutionState.Success(automation, finishedTime - startTime)
+            ExecutionState.Completed(log)
         } else {
-            ExecutionState.Failed(automation, failedStepTitle ?: "Unknown", failureReason ?: "Error")
+            ExecutionState.Failed(log, failureReason ?: "Unknown error")
         }
 
         if (automation.speakStepProgress) {

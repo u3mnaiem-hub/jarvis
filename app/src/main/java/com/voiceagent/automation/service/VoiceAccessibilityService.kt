@@ -34,8 +34,8 @@ class VoiceAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         
-        // If recording mode is currently active, capture user interaction
-        if (AutomationRecorderEngine.isRecording) {
+        // If recording mode is currently active (and not paused), capture user interaction
+        if (AutomationRecorderEngine.isRecordingActive) {
             handleRecordingEvent(event)
         }
     }
@@ -169,35 +169,36 @@ class VoiceAccessibilityService : AccessibilityService() {
 
         // 2. Try single text or placeholder match
         if (!text.isNullOrBlank()) {
-            val nodeText = node.text?.toString()
+            val nodeText = node.text?.toString()?.trim()
             val hintText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                node.hintText?.toString()
+                node.hintText?.toString()?.trim()
             } else null
 
-            if (nodeText != null && (nodeText.contains(text, ignoreCase = true) || text.contains(nodeText, ignoreCase = true))) {
+            if (!nodeText.isNullOrBlank() && (nodeText.contains(text, ignoreCase = true) || (nodeText.length >= 2 && text.contains(nodeText, ignoreCase = true)))) {
                 return node
             }
-            if (hintText != null && (hintText.contains(text, ignoreCase = true) || text.contains(hintText, ignoreCase = true))) {
+            if (!hintText.isNullOrBlank() && (hintText.contains(text, ignoreCase = true) || (hintText.length >= 2 && text.contains(hintText, ignoreCase = true)))) {
                 return node
             }
         }
 
         // 3. Try multi-candidate text matches (e.g. ["Login", "Log in", "Sign in", "تسجيل الدخول", "دخول"])
         if (candidateTexts.isNotEmpty()) {
-            val nodeText = node.text?.toString()
-            val nodeDesc = node.contentDescription?.toString()
+            val nodeText = node.text?.toString()?.trim()
+            val nodeDesc = node.contentDescription?.toString()?.trim()
             val hintText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                node.hintText?.toString()
+                node.hintText?.toString()?.trim()
             } else null
 
             for (cand in candidateTexts) {
-                if (nodeText != null && (nodeText.contains(cand, ignoreCase = true) || cand.contains(nodeText, ignoreCase = true))) {
+                if (cand.isBlank()) continue
+                if (!nodeText.isNullOrBlank() && (nodeText.contains(cand, ignoreCase = true) || (nodeText.length >= 2 && cand.contains(nodeText, ignoreCase = true)))) {
                     return node
                 }
-                if (nodeDesc != null && (nodeDesc.contains(cand, ignoreCase = true) || cand.contains(nodeDesc, ignoreCase = true))) {
+                if (!nodeDesc.isNullOrBlank() && (nodeDesc.contains(cand, ignoreCase = true) || (nodeDesc.length >= 2 && cand.contains(nodeDesc, ignoreCase = true)))) {
                     return node
                 }
-                if (hintText != null && (hintText.contains(cand, ignoreCase = true) || cand.contains(hintText, ignoreCase = true))) {
+                if (!hintText.isNullOrBlank() && (hintText.contains(cand, ignoreCase = true) || (hintText.length >= 2 && cand.contains(hintText, ignoreCase = true)))) {
                     return node
                 }
             }
@@ -240,15 +241,21 @@ class VoiceAccessibilityService : AccessibilityService() {
         // Fallback: click coordinates via gesture
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
+        if (bounds.isEmpty) return false
         return clickCoordinates(bounds.centerX().toFloat(), bounds.centerY().toFloat())
     }
 
     fun setTextOnNode(node: AccessibilityNodeInfo, text: String): Boolean {
-        // Focus first
+        // Focus (and click if needed) before setting text for better WebView/browser compatibility
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
+        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            return true
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 

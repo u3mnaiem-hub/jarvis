@@ -37,6 +37,7 @@ fun WorkflowEditorScreen(
     val coroutineScope = rememberCoroutineScope()
     val db = remember { VoiceAgentDatabase.getInstance(context) }
 
+    var existingAutomation by remember { mutableStateOf<Automation?>(null) }
     var name by remember { mutableStateOf("") }
     var nameAr by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -55,6 +56,7 @@ fun WorkflowEditorScreen(
         if (!automationId.isNullOrBlank() && automationId != "new") {
             val existing = db.automationDao().getAutomationById(automationId)
             if (existing != null) {
+                existingAutomation = existing
                 name = existing.name
                 nameAr = existing.nameAr
                 description = existing.description
@@ -91,16 +93,29 @@ fun WorkflowEditorScreen(
                                 return@Button
                             }
                             val phrases = voicePhrasesText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-                            val auto = Automation(
-                                id = if (automationId.isNullOrBlank() || automationId == "new") UUID.randomUUID().toString() else automationId,
-                                name = name.trim(),
-                                nameAr = nameAr.trim(),
-                                description = description.trim(),
-                                category = category,
-                                voicePhrases = phrases,
-                                steps = steps.mapIndexed { idx, s -> s.copy(order = idx + 1) },
-                                isFavorite = isFavorite
-                            )
+                            val base = existingAutomation
+                            val auto = if (base != null) {
+                                base.copy(
+                                    name = name.trim(),
+                                    nameAr = nameAr.trim(),
+                                    description = description.trim(),
+                                    category = category,
+                                    voicePhrases = phrases,
+                                    steps = steps.mapIndexed { idx, s -> s.copy(order = idx + 1) },
+                                    isFavorite = isFavorite
+                                )
+                            } else {
+                                Automation(
+                                    id = if (automationId.isNullOrBlank() || automationId == "new") UUID.randomUUID().toString() else automationId,
+                                    name = name.trim(),
+                                    nameAr = nameAr.trim(),
+                                    description = description.trim(),
+                                    category = category,
+                                    voicePhrases = phrases,
+                                    steps = steps.mapIndexed { idx, s -> s.copy(order = idx + 1) },
+                                    isFavorite = isFavorite
+                                )
+                            }
                             coroutineScope.launch {
                                 db.automationDao().insertOrUpdate(auto)
                                 Toast.makeText(context, "تم حفظ المهمة بنجاح", Toast.LENGTH_SHORT).show()

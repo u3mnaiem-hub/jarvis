@@ -18,6 +18,9 @@ object AutomationRecorderEngine {
     private val _recordedStepsFlow = MutableStateFlow<List<AutomationStep>>(emptyList())
     val recordedStepsFlow: StateFlow<List<AutomationStep>> = _recordedStepsFlow.asStateFlow()
 
+    @Volatile
+    private var lastStepTimestampMs: Long = 0L
+
     val isRecording: Boolean
         get() = _isRecordingFlow.value
 
@@ -91,7 +94,9 @@ object AutomationRecorderEngine {
         }
 
         // 2. Deduplicate rapid duplicate clicks on the exact same element within 400ms
+        val now = System.currentTimeMillis()
         if (lastStep != null &&
+            (now - lastStepTimestampMs) < 400L &&
             lastStep.actionType == indexedStep.actionType &&
             lastStep.selectorResourceId == indexedStep.selectorResourceId &&
             lastStep.selectorText == indexedStep.selectorText &&
@@ -100,6 +105,7 @@ object AutomationRecorderEngine {
             return
         }
 
+        lastStepTimestampMs = now
         currentList.add(indexedStep)
         _recordedStepsFlow.value = currentList
         Log.d(TAG, "Recorded step #$nextOrder: ${indexedStep.title}")

@@ -26,6 +26,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.model.Automation
+import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.VoiceAccessibilityService
 import com.voiceagent.automation.template.DemoWorkflows
 import com.voiceagent.automation.ui.theme.*
@@ -44,8 +45,8 @@ fun SettingsScreen(
     val db = remember { VoiceAgentDatabase.getInstance(context) }
     val isServiceConnected by VoiceAccessibilityService.isServiceConnected.collectAsState()
 
-    var spokenFeedbackEnabled by remember { mutableStateOf(true) }
-    var selectedLanguage by remember { mutableStateOf("ar-EG") }
+    var spokenFeedbackEnabled by remember { mutableStateOf(SafeModeManager.isTtsEnabled(context)) }
+    var selectedLanguage by remember { mutableStateOf(SafeModeManager.getVoiceLanguage(context)) }
 
     Scaffold(
         topBar = {
@@ -263,7 +264,10 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = spokenFeedbackEnabled,
-                            onCheckedChange = { spokenFeedbackEnabled = it }
+                            onCheckedChange = {
+                                spokenFeedbackEnabled = it
+                                SafeModeManager.setTtsEnabled(context, it)
+                            }
                         )
                     }
 
@@ -277,21 +281,30 @@ fun SettingsScreen(
                         item {
                             FilterChip(
                                 selected = selectedLanguage == "ar-EG",
-                                onClick = { selectedLanguage = "ar-EG" },
+                                onClick = {
+                                    selectedLanguage = "ar-EG"
+                                    SafeModeManager.setVoiceLanguage(context, "ar-EG")
+                                },
                                 label = { Text("مصر 🇪🇬", fontSize = 12.sp) }
                             )
                         }
                         item {
                             FilterChip(
                                 selected = selectedLanguage == "ar-SA",
-                                onClick = { selectedLanguage = "ar-SA" },
+                                onClick = {
+                                    selectedLanguage = "ar-SA"
+                                    SafeModeManager.setVoiceLanguage(context, "ar-SA")
+                                },
                                 label = { Text("فصحى 🇸🇦", fontSize = 12.sp) }
                             )
                         }
                         item {
                             FilterChip(
                                 selected = selectedLanguage == "en-US",
-                                onClick = { selectedLanguage = "en-US" },
+                                onClick = {
+                                    selectedLanguage = "en-US"
+                                    SafeModeManager.setVoiceLanguage(context, "en-US")
+                                },
                                 label = { Text("English 🇺🇸", fontSize = 12.sp) }
                             )
                         }

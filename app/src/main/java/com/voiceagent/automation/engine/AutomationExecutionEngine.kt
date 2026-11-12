@@ -9,6 +9,7 @@ import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.model.*
 import com.voiceagent.automation.security.BankingProtectionManager
 import com.voiceagent.automation.security.KeystoreManager
+import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.AutomationForegroundService
 import com.voiceagent.automation.service.VoiceAccessibilityService
 import com.voiceagent.automation.voice.TextToSpeechManager
@@ -16,6 +17,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.coroutines.resume
 
 object AutomationExecutionEngine {
     private const val TAG = "AutomationEngine"
@@ -63,7 +65,7 @@ object AutomationExecutionEngine {
             Log.i(TAG, "Starting workflow '${automation.name}' with $totalSteps steps")
 
             // Spoken start announcement
-            if (automation.speakStepProgress) {
+            if (automation.speakStepProgress && SafeModeManager.isTtsEnabled(context)) {
                 TextToSpeechManager.speak("Starting: ${automation.name}")
             }
 
@@ -73,221 +75,260 @@ object AutomationExecutionEngine {
                 automation.name,
                 "Initializing automation...",
                 1,
-                totalSteps
+                totalSteps.coerceAtLeast(1)
             )
 
-            // For actions that need accessibility, check service
-            val needsAccessibility = automation.steps.any { 
-                it.actionType in listOf(
-                    ActionType.CLICK_ELEMENT,
-                    ActionType.CLICK_COORDINATE,
-                    ActionType.SET_TEXT,
-                    ActionType.INJECT_CREDENTIAL,
-                    ActionType.CLEAR_TEXT,
-                    ActionType.WAIT_FOR_ELEMENT,
-                    ActionType.SCROLL_FORWARD,
-                    ActionType.SCROLL_BACKWARD,
-                    ActionType.SWIPE,
-                    ActionType.PRESS_BACK,
-                    ActionType.PRESS_HOME
-                )
-            }
-
-            val service = VoiceAccessibilityService.instance
-            if (needsAccessibility && service == null) {
-                val errorMsg = "Accessibility Service is not enabled. Please enable it in Settings to run UI automation."
-                Log.e(TAG, errorMsg)
-                recordLogAndFinish(
-                    db, context, automation, startTime, false, 0, totalSteps,
-                    "Service Check", errorMsg, "Accessibility Disabled",
-                    "Enable Voice Agent in Android Settings -> Accessibility -> Installed Apps.",
-                    stepExecutionDetails, onComplete
-                )
-                return@launch
-            }
-
-            var currentStepIndex = 0
-            while (currentStepIndex < automation.steps.size) {
-                if (isStopRequested) {
-                    Log.w(TAG, "Execution aborted by stop request at step $currentStepIndex")
-                    isOverallSuccess = false
-                    failureReason = "Execution stopped by user"
-                    failureCategory = "User Cancelled"
-                    suggestedAction = "You can restart the workflow when ready."
-                    break
-                }
-
-                val step = automation.steps[currentStepIndex]
-                val stepStartTime = System.currentTimeMillis()
-
-                // Skip disabled steps
-                if (!step.isStepEnabled) {
-                    Log.d(TAG, "Skipping disabled step: ${step.title}")
-                    stepExecutionDetails.add(
-                        StepExecutionDetail(
-                            stepOrder = step.order,
-                            stepTitle = step.title,
-                            actionType = step.actionType,
-                            status = StepStatus.SKIPPED,
-                            startedAt = stepStartTime,
-                            finishedAt = System.currentTimeMillis(),
-                            message = "Step is disabled"
-                        )
+            try {
+                // For actions that need accessibility, check service
+                val needsAccessibility = automation.steps.any {
+                    it.actionType in listOf(
+                        ActionType.CLICK_ELEMENT,
+                        ActionType.CLICK_COORDINATE,
+                        ActionType.SET_TEXT,
+                        ActionType.INJECT_CREDENTIAL,
+                        ActionType.CLEAR_TEXT,
+                        ActionType.WAIT_FOR_ELEMENT,
+                        ActionType.SCROLL_FORWARD,
+                        ActionType.SCROLL_BACKWARD,
+                        ActionType.SWIPE,
+                        ActionType.PRESS_BACK,
+                        ActionType.PRESS_HOME,
+                        ActionType.CHECK_ELEMENT_EXISTS,
+                        ActionType.CHECK_TEXT_EXISTS
                     )
-                    currentStepIndex++
-                    continue
                 }
 
-                // SECURITY CHECK: Banking Protection
-                if (!step.targetPackage.isNullOrBlank() && BankingProtectionManager.isPackageProtected(context, step.targetPackage)) {
-                    val secMsg = "Security Protection: Automation against financial app '${step.targetPackage}' is strictly blocked."
-                    Log.e(TAG, secMsg)
-                    isOverallSuccess = false
-                    failedStepTitle = step.title
-                    failureReason = secMsg
-                    failureCategory = "Banking Protection"
-                    suggestedAction = "Banking applications cannot be automated for financial security."
-
-                    stepExecutionDetails.add(
-                        StepExecutionDetail(
-                            stepOrder = step.order,
-                            stepTitle = step.title,
-                            actionType = step.actionType,
-                            status = StepStatus.FAILED,
-                            startedAt = stepStartTime,
-                            finishedAt = System.currentTimeMillis(),
-                            expectedElement = step.targetPackage,
-                            elementFound = false,
-                            actionAttempted = false,
-                            actionConfirmed = false,
-                            failureReason = secMsg,
-                            suggestedAction = suggestedAction,
-                            message = secMsg
-                        )
+                val service = VoiceAccessibilityService.instance
+                if (needsAccessibility && service == null) {
+                    val errorMsg = "Accessibility Service is not enabled. Please enable it in Settings to run UI automation."
+                    Log.e(TAG, errorMsg)
+                    recordLogAndFinish(
+                        db, context, automation, startTime, false, 0, totalSteps,
+                        "Service Check", errorMsg, "Accessibility Disabled",
+                        "Enable Voice Agent in Android Settings -> Accessibility -> Installed Apps.",
+                        stepExecutionDetails, onComplete
                     )
-                    break
+                    return@launch
                 }
 
-                _executionState.value = ExecutionState.Running(
-                    automation = automation,
-                    currentStepIndex = currentStepIndex,
-                    currentStep = step,
-                    totalSteps = totalSteps
-                )
-
-                // Update Foreground notification
-                AutomationForegroundService.start(
-                    context,
-                    automation.name,
-                    "${step.order}. ${step.title}",
-                    currentStepIndex + 1,
-                    totalSteps
-                )
-
-                // Optional spoken step progress
-                if (automation.speakStepProgress && !step.spokenMessage.isNullOrBlank()) {
-                    TextToSpeechManager.speak(step.spokenMessage)
-                }
-
-                // Pre-delay
-                if (step.delayBeforeMs > 0) {
-                    delay(step.delayBeforeMs)
-                }
-
-                // Execute step with retry logic
-                var stepSuccess = false
-                var stepError: String? = null
-                var actionAttempted = false
-                var actionConfirmed = false
-                var elementFound = false
-                var actualRetries = 0
-                val attempts = (step.maxRetries + 1).coerceAtLeast(1)
-
-                for (attempt in 1..attempts) {
-                    if (isStopRequested) break
-                    actualRetries = attempt - 1
-                    try {
-                        val result = executeSingleStep(context, service, db, step)
-                        stepSuccess = result.success
-                        stepError = result.errorMessage
-                        actionAttempted = result.actionAttempted
-                        actionConfirmed = result.actionConfirmed
-                        elementFound = result.elementFound
-                        if (stepSuccess) break
-                    } catch (e: Exception) {
-                        stepError = e.message
-                        Log.e(TAG, "Error executing step '${step.title}' attempt $attempt: $stepError")
+                var currentStepIndex = 0
+                while (currentStepIndex < automation.steps.size) {
+                    if (isStopRequested) {
+                        Log.w(TAG, "Execution aborted by stop request at step $currentStepIndex")
+                        isOverallSuccess = false
+                        failureReason = "Execution stopped by user"
+                        failureCategory = "User Cancelled"
+                        suggestedAction = "You can restart the workflow when ready."
+                        break
                     }
-                    if (attempt < attempts && !isStopRequested) {
-                        delay(600)
+
+                    val step = automation.steps[currentStepIndex]
+                    val stepStartTime = System.currentTimeMillis()
+
+                    // Skip disabled steps
+                    if (!step.isStepEnabled) {
+                        Log.d(TAG, "Skipping disabled step: ${step.title}")
+                        stepExecutionDetails.add(
+                            StepExecutionDetail(
+                                stepOrder = step.order,
+                                stepTitle = step.title,
+                                actionType = step.actionType,
+                                status = StepStatus.SKIPPED,
+                                startedAt = stepStartTime,
+                                finishedAt = System.currentTimeMillis(),
+                                message = "Step is disabled"
+                            )
+                        )
+                        currentStepIndex++
+                        continue
                     }
-                }
 
-                // Post-verification check if specified
-                if (stepSuccess && !step.verificationText.isNullOrBlank() && service != null) {
-                    val verifyNode = waitForVerification(service, step.verificationText, step.verificationResourceId, 5)
-                    if (verifyNode != null) {
-                        actionConfirmed = true
-                    } else {
-                        stepSuccess = false
-                        stepError = "Expected verification element '${step.verificationText}' did not appear."
-                        actionConfirmed = false
-                    }
-                }
-
-                val stepFinishedTime = System.currentTimeMillis()
-                val detail = StepExecutionDetail(
-                    stepOrder = step.order,
-                    stepTitle = step.title,
-                    actionType = step.actionType,
-                    status = if (stepSuccess) StepStatus.SUCCESS else StepStatus.FAILED,
-                    startedAt = stepStartTime,
-                    finishedAt = stepFinishedTime,
-                    expectedElement = step.selectorText ?: step.selectorResourceId ?: step.candidateTexts.firstOrNull() ?: step.url,
-                    elementFound = elementFound,
-                    actionAttempted = actionAttempted,
-                    actionConfirmed = actionConfirmed,
-                    retryCount = actualRetries,
-                    failureReason = if (stepSuccess) null else stepError,
-                    suggestedAction = if (stepSuccess) null else classifySuggestedAction(step, stepError),
-                    message = if (stepSuccess) "Action executed and verified successfully" else (stepError ?: "Failed to execute step")
-                )
-                stepExecutionDetails.add(detail)
-
-                if (stepSuccess) {
-                    completedCount++
-                } else {
-                    if (step.stopOnFailure) {
+                    // SECURITY CHECK: Banking Protection
+                    if (!step.targetPackage.isNullOrBlank() && BankingProtectionManager.isPackageProtected(context, step.targetPackage)) {
+                        val secMsg = "Security Protection: Automation against financial app '${step.targetPackage}' is strictly blocked."
+                        Log.e(TAG, secMsg)
                         isOverallSuccess = false
                         failedStepTitle = step.title
-                        failureReason = stepError ?: "Element not found or timed out"
-                        failureCategory = classifyFailureCategory(step, stepError)
-                        suggestedAction = classifySuggestedAction(step, stepError)
-                        Log.e(TAG, "Step '${step.title}' failed and stopOnFailure is true. Aborting.")
+                        failureReason = secMsg
+                        failureCategory = "Banking Protection"
+                        suggestedAction = "Banking applications cannot be automated for financial security."
+
+                        stepExecutionDetails.add(
+                            StepExecutionDetail(
+                                stepOrder = step.order,
+                                stepTitle = step.title,
+                                actionType = step.actionType,
+                                status = StepStatus.FAILED,
+                                startedAt = stepStartTime,
+                                finishedAt = System.currentTimeMillis(),
+                                expectedElement = step.targetPackage,
+                                elementFound = false,
+                                actionAttempted = false,
+                                actionConfirmed = false,
+                                failureReason = secMsg,
+                                suggestedAction = suggestedAction,
+                                message = secMsg
+                            )
+                        )
                         break
-                    } else {
-                        Log.w(TAG, "Step '${step.title}' failed but stopOnFailure is false. Continuing.")
                     }
+
+                    _executionState.value = ExecutionState.Running(
+                        automation = automation,
+                        currentStepIndex = currentStepIndex,
+                        currentStep = step,
+                        totalSteps = totalSteps.coerceAtLeast(1)
+                    )
+
+                    // Update Foreground notification
+                    AutomationForegroundService.start(
+                        context,
+                        automation.name,
+                        "${step.order}. ${step.title}",
+                        currentStepIndex + 1,
+                        totalSteps.coerceAtLeast(1)
+                    )
+
+                    // Optional spoken step progress
+                    if (automation.speakStepProgress && SafeModeManager.isTtsEnabled(context) && !step.spokenMessage.isNullOrBlank()) {
+                        TextToSpeechManager.speak(step.spokenMessage)
+                    }
+
+                    // Pre-delay
+                    if (step.delayBeforeMs > 0) {
+                        delay(step.delayBeforeMs)
+                    }
+
+                    // Execute step with retry logic
+                    var stepSuccess = false
+                    var stepError: String? = null
+                    var actionAttempted = false
+                    var actionConfirmed = false
+                    var elementFound = false
+                    var actualRetries = 0
+                    val attempts = (step.maxRetries + 1).coerceAtLeast(1)
+
+                    for (attempt in 1..attempts) {
+                        if (isStopRequested) break
+                        actualRetries = attempt - 1
+                        try {
+                            val result = executeSingleStep(context, service, db, step)
+                            stepSuccess = result.success
+                            stepError = result.errorMessage
+                            actionAttempted = result.actionAttempted
+                            actionConfirmed = result.actionConfirmed
+                            elementFound = result.elementFound
+                            if (stepSuccess) break
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            stepError = e.message
+                            Log.e(TAG, "Error executing step '${step.title}' attempt $attempt: $stepError")
+                        }
+                        if (attempt < attempts && !isStopRequested) {
+                            delay(600)
+                        }
+                    }
+
+                    // Post-verification check if specified
+                    if (stepSuccess && !step.verificationText.isNullOrBlank() && service != null) {
+                        val verifyNode = waitForVerification(service, step.verificationText, step.verificationResourceId, 5)
+                        if (verifyNode != null) {
+                            actionConfirmed = true
+                        } else {
+                            stepSuccess = false
+                            stepError = "Expected verification element '${step.verificationText}' did not appear."
+                            actionConfirmed = false
+                        }
+                    }
+
+                    val stepFinishedTime = System.currentTimeMillis()
+                    val detail = StepExecutionDetail(
+                        stepOrder = step.order,
+                        stepTitle = step.title,
+                        actionType = step.actionType,
+                        status = if (stepSuccess) StepStatus.SUCCESS else StepStatus.FAILED,
+                        startedAt = stepStartTime,
+                        finishedAt = stepFinishedTime,
+                        expectedElement = step.selectorText ?: step.selectorResourceId ?: step.candidateTexts.firstOrNull() ?: step.url,
+                        elementFound = elementFound,
+                        actionAttempted = actionAttempted,
+                        actionConfirmed = actionConfirmed,
+                        retryCount = actualRetries,
+                        failureReason = if (stepSuccess) null else stepError,
+                        suggestedAction = if (stepSuccess) null else classifySuggestedAction(step, stepError),
+                        message = if (stepSuccess) "Action executed and verified successfully" else (stepError ?: "Failed to execute step")
+                    )
+                    stepExecutionDetails.add(detail)
+
+                    // Conditional jump handling
+                    val jumpTargetId = if (stepSuccess) step.onConditionMetJumpToStepId else step.onConditionFailedJumpToStepId
+                    if (!jumpTargetId.isNullOrBlank()) {
+                        val jumpIdx = automation.steps.indexOfFirst { it.id == jumpTargetId }
+                        if (jumpIdx >= 0) {
+                            if (stepSuccess) completedCount++
+                            currentStepIndex = jumpIdx
+                            continue
+                        }
+                    }
+
+                    if (stepSuccess) {
+                        completedCount++
+                    } else {
+                        if (step.stopOnFailure) {
+                            isOverallSuccess = false
+                            failedStepTitle = step.title
+                            failureReason = stepError ?: "Element not found or timed out"
+                            failureCategory = classifyFailureCategory(step, stepError)
+                            suggestedAction = classifySuggestedAction(step, stepError)
+                            Log.e(TAG, "Step '${step.title}' failed and stopOnFailure is true. Aborting.")
+                            break
+                        } else {
+                            Log.w(TAG, "Step '${step.title}' failed but stopOnFailure is false. Continuing.")
+                        }
+                    }
+
+                    // Post-delay
+                    if (step.delayAfterMs > 0) {
+                        delay(step.delayAfterMs)
+                    }
+
+                    currentStepIndex++
                 }
 
-                // Post-delay
-                if (step.delayAfterMs > 0) {
-                    delay(step.delayAfterMs)
+                // Final status and database log
+                recordLogAndFinish(
+                    db, context, automation, startTime, isOverallSuccess,
+                    completedCount, totalSteps, failedStepTitle, failureReason,
+                    failureCategory, suggestedAction,
+                    stepExecutionDetails, onComplete
+                )
+            } catch (e: CancellationException) {
+                Log.w(TAG, "Automation '${automation.name}' was cancelled")
+                withContext(NonCancellable) {
+                    recordLogAndFinish(
+                        db, context, automation, startTime, false,
+                        completedCount, totalSteps, failedStepTitle ?: "Stopped",
+                        "Execution stopped by user", "User Aborted",
+                        "You can restart the workflow when ready.",
+                        stepExecutionDetails, onComplete
+                    )
                 }
-
-                currentStepIndex++
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error during automation '${automation.name}': ${e.message}", e)
+                withContext(NonCancellable) {
+                    recordLogAndFinish(
+                        db, context, automation, startTime, false,
+                        completedCount, totalSteps, failedStepTitle ?: "Unexpected Error",
+                        e.message ?: "Unexpected execution error", "Execution Interrupted",
+                        "Check step parameters and try again.",
+                        stepExecutionDetails, onComplete
+                    )
+                }
+            } finally {
+                // Always stop Foreground Service
+                AutomationForegroundService.stop(context)
             }
-
-            // Stop Foreground Service
-            AutomationForegroundService.stop(context)
-
-            // Final status and database log
-            recordLogAndFinish(
-                db, context, automation, startTime, isOverallSuccess,
-                completedCount, totalSteps, failedStepTitle, failureReason,
-                failureCategory, suggestedAction,
-                stepExecutionDetails, onComplete
-            )
         }
     }
 
@@ -394,10 +435,8 @@ object AutomationExecutionEngine {
                 }
                 // Fallback to screen coordinates if provided
                 if (step.clickX != null && step.clickY != null) {
-                    var clicked = false
-                    service.clickCoordinates(step.clickX, step.clickY) { clicked = it }
-                    delay(250)
-                    return StepResult(true, elementFound = false, actionAttempted = true, actionConfirmed = true)
+                    val clicked = awaitClickCoordinates(service, step.clickX, step.clickY)
+                    return StepResult(clicked, if (clicked) null else "Coordinate tap gesture was cancelled", elementFound = false, actionAttempted = true, actionConfirmed = clicked)
                 }
                 val label = step.selectorText ?: step.selectorResourceId ?: step.candidateTexts.joinToString("/") ?: "Button"
                 val snapshot = service.dumpVisibleScreenNodes()
@@ -408,8 +447,8 @@ object AutomationExecutionEngine {
             ActionType.CLICK_COORDINATE -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
                 if (step.clickX != null && step.clickY != null) {
-                    service.clickCoordinates(step.clickX, step.clickY)
-                    return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+                    val clicked = awaitClickCoordinates(service, step.clickX, step.clickY)
+                    return StepResult(clicked, if (clicked) null else "Coordinate tap gesture failed or was cancelled", elementFound = true, actionAttempted = true, actionConfirmed = clicked)
                 }
                 return StepResult(false, "Coordinates (X, Y) are not specified", actionAttempted = false, elementFound = false)
             }
@@ -473,8 +512,8 @@ object AutomationExecutionEngine {
             ActionType.SWIPE -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
                 if (step.swipeStartX != null && step.swipeStartY != null && step.swipeEndX != null && step.swipeEndY != null) {
-                    service.swipe(step.swipeStartX, step.swipeStartY, step.swipeEndX, step.swipeEndY, step.swipeDurationMs)
-                    return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+                    val swiped = awaitSwipe(service, step.swipeStartX, step.swipeStartY, step.swipeEndX, step.swipeEndY, step.swipeDurationMs)
+                    return StepResult(swiped, if (swiped) null else "Swipe gesture failed or was cancelled", elementFound = true, actionAttempted = true, actionConfirmed = swiped)
                 }
                 return StepResult(false, "Swipe coordinates are missing", actionAttempted = false, elementFound = false)
             }
@@ -519,6 +558,39 @@ object AutomationExecutionEngine {
                 return StepResult(true, actionAttempted = true, actionConfirmed = true)
             }
         }
+    }
+
+    private suspend fun awaitClickCoordinates(service: VoiceAccessibilityService, x: Float, y: Float): Boolean {
+        return withTimeoutOrNull(3000L) {
+            suspendCancellableCoroutine { cont ->
+                val dispatched = service.clickCoordinates(x, y) { completed ->
+                    if (cont.isActive) cont.resume(completed)
+                }
+                if (!dispatched && cont.isActive) {
+                    cont.resume(false)
+                }
+            }
+        } ?: false
+    }
+
+    private suspend fun awaitSwipe(
+        service: VoiceAccessibilityService,
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+        durationMs: Long
+    ): Boolean {
+        return withTimeoutOrNull(durationMs.coerceAtLeast(100) + 3000L) {
+            suspendCancellableCoroutine { cont ->
+                val dispatched = service.swipe(startX, startY, endX, endY, durationMs) { completed ->
+                    if (cont.isActive) cont.resume(completed)
+                }
+                if (!dispatched && cont.isActive) {
+                    cont.resume(false)
+                }
+            }
+        } ?: false
     }
 
     private suspend fun waitForNode(
@@ -634,7 +706,7 @@ object AutomationExecutionEngine {
             ExecutionState.Failed(log, failureReason ?: "Unknown error")
         }
 
-        if (automation.speakStepProgress) {
+        if (automation.speakStepProgress && SafeModeManager.isTtsEnabled(context)) {
             if (isSuccess) {
                 TextToSpeechManager.speak("Workflow completed successfully")
             } else {

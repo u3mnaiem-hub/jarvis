@@ -12,6 +12,8 @@ import android.content.SharedPreferences
 object SafeModeManager {
     private const val PREFS_NAME = "safe_mode_prefs"
     private const val KEY_ADVANCED_MODE_ENABLED = "advanced_automation_mode_enabled"
+    private const val KEY_TTS_ENABLED = "tts_feedback_enabled"
+    private const val KEY_VOICE_LANGUAGE = "voice_recognition_language"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -27,5 +29,21 @@ object SafeModeManager {
 
     fun setAdvancedModeEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_ADVANCED_MODE_ENABLED, enabled).apply()
+    }
+
+    fun isTtsEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_TTS_ENABLED, true)
+    }
+
+    fun setTtsEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_TTS_ENABLED, enabled).apply()
+    }
+
+    fun getVoiceLanguage(context: Context): String {
+        return getPrefs(context).getString(KEY_VOICE_LANGUAGE, "ar-EG") ?: "ar-EG"
+    }
+
+    fun setVoiceLanguage(context: Context, languageCode: String) {
+        getPrefs(context).edit().putString(KEY_VOICE_LANGUAGE, languageCode).apply()
     }
 }

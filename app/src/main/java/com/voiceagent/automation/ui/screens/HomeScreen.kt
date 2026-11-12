@@ -37,6 +37,7 @@ import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.engine.AutomationExecutionEngine
 import com.voiceagent.automation.engine.ExecutionState
 import com.voiceagent.automation.model.Automation
+import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.VoiceAccessibilityService
 import com.voiceagent.automation.ui.theme.*
 import com.voiceagent.automation.voice.CommandMatchingEngine
@@ -70,6 +71,12 @@ fun HomeScreen(
     val voiceManager = remember { VoiceRecognitionManager(context) }
     val voiceState by voiceManager.voiceState.collectAsState()
 
+    DisposableEffect(voiceManager) {
+        onDispose {
+            voiceManager.stopListening()
+        }
+    }
+
     var matchedAutomation by remember { mutableStateOf<Automation?>(null) }
     var matchConfidenceText by remember { mutableStateOf<String?>(null) }
     var ambiguousOptions by remember { mutableStateOf<List<Automation>>(emptyList()) }
@@ -79,7 +86,7 @@ fun HomeScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            voiceManager.startListening("ar-EG")
+            voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
         }
     }
 
@@ -280,7 +287,7 @@ fun HomeScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         LinearProgressIndicator(
-                            progress = (running.currentStepIndex + 1).toFloat() / running.totalSteps,
+                            progress = (running.currentStepIndex + 1).toFloat() / running.totalSteps.coerceAtLeast(1),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp),
@@ -356,7 +363,7 @@ fun HomeScreen(
                                 ) == PackageManager.PERMISSION_GRANTED
 
                                 if (hasAudioPermission) {
-                                    voiceManager.startListening("ar-EG")
+                                    voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
                                 } else {
                                     permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
@@ -424,6 +431,31 @@ fun HomeScreen(
                                     Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("تنفيذ المهمة الآن (Run)", fontSize = 12.sp)
+                                }
+                            }
+                        } else if (ambiguousOptions.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                ambiguousOptions.forEach { candidate ->
+                                    OutlinedButton(
+                                        onClick = {
+                                            ambiguousOptions = emptyList()
+                                            matchedAutomation = candidate
+                                            AutomationExecutionEngine.executeAutomation(context, candidate)
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp), tint = Emerald600)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = candidate.nameAr.ifBlank { candidate.name },
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }

@@ -130,11 +130,26 @@ fun BankingProtectionScreen(
                         }
 
                         Text(
-                            "عند تفعيل هذا الخيار، يتوقف Voice Agent تلقائياً وفورياً عن فحص أو تسجيل أو إرسال أي نقرات أو قراءة لأي نافذة تخص تطبيقاً مالياً أو بنكياً (مثل InstaPay، بنك مصر، CIB، الأهلي، المحافظ الإلكترونية)، مما يمنع إغلاق هذه التطبيقات نهائياً ويحافظ على أمان حساباتك.",
+                            "عند تفعيل هذا الخيار، يتوقف Voice Agent تلقائياً عن تسجيل أو إرسال أي نقرات أو قراءة لأي نافذة تخص تطبيقاً مالياً أو بنكياً (مثل InstaPay، بنك مصر، CIB، الأهلي، المحافظ الإلكترونية). ملاحظة: تطبيق إنستاباي وبعض البنوك قد ترفض العمل أثناء تفعيل أي خدمة Accessibility في نظام أندرويد؛ يمكنك إيقافها مؤقتاً من الزر بالأسفل عند استخدام إنستاباي.",
                             fontSize = 12.5.sp,
                             color = Slate700,
                             lineHeight = 18.sp
                         )
+
+                        OutlinedButton(
+                            onClick = {
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.AccessibilityNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("فتح إعدادات الـ Accessibility (إيقاف/تشغيل مؤقت)", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }

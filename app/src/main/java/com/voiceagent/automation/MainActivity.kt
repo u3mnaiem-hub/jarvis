@@ -1,5 +1,6 @@
 package com.voiceagent.automation
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,6 +20,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.ui.navigation.Screen
 import com.voiceagent.automation.ui.screens.*
 import com.voiceagent.automation.ui.theme.VoiceAgentTheme
@@ -30,8 +32,13 @@ data class BottomNavItem(
 )
 
 class MainActivity : ComponentActivity() {
+    private var autoListenTrigger by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (shouldAutoListen(intent)) {
+            autoListenTrigger++
+}
         setContent {
             VoiceAgentTheme {
                 val navController = rememberNavController()
@@ -70,7 +77,7 @@ class MainActivity : ComponentActivity() {
                                                 imageVector = item.icon,
                                                 contentDescription = stringResource(item.labelRes)
                                             )
-                                        },
+                                },
                                         label = {
                                             Text(
                                                 text = stringResource(item.labelRes),
@@ -78,27 +85,27 @@ class MainActivity : ComponentActivity() {
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
-                                        },
+                                },
                                         alwaysShowLabel = true,
                                         selected = selected,
                                         onClick = {
                                             if (item.screen == Screen.CreateWorkflow) {
                                                 navController.navigate("workflow_editor/new")
-                                            } else {
+                                    } else {
                                                 navController.navigate(item.screen.route) {
                                                     popUpTo(navController.graph.findStartDestination().id) {
                                                         saveState = true
-                                                    }
+                                            }
                                                     launchSingleTop = true
                                                     restoreState = true
-                                                }
-                                            }
                                         }
-                                    )
+                                    }
                                 }
-                            }
+                                    )
                         }
                     }
+                }
+            }
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
@@ -107,111 +114,125 @@ class MainActivity : ComponentActivity() {
                     ) {
                         composable(Screen.Home.route) {
                             HomeScreen(
-                                onNavigateToCreate = { navController.navigate("workflow_editor/new") },
-                                onNavigateToMyAutomations = { navController.navigate(Screen.MyAutomations.route) },
-                                onNavigateToHistory = { navController.navigate(Screen.ExecutionHistory.route) },
-                                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
-                                onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route) },
-                                onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route) },
-                                onNavigateToFailureDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id)) },
-                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) },
-                                onNavigateToBrowser = { navController.navigate(Screen.Browser.route) }
+                                autoListenTrigger = autoListenTrigger,
+                                onNavigateToCreate = { navController.navigate("workflow_editor/new")},
+                                onNavigateToMyAutomations = { navController.navigate(Screen.MyAutomations.route)},
+                                onNavigateToHistory = { navController.navigate(Screen.ExecutionHistory.route)},
+                                onNavigateToSettings = { navController.navigate(Screen.Settings.route)},
+                                onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route)},
+                                onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route)},
+                                onNavigateToFailureDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id))},
+                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route)},
+                                onNavigateToBrowser = { navController.navigate(Screen.Browser.route)}
                             )
-                        }
+                }
 
                         composable(Screen.Finance.route) {
                             MasrofyFinanceScreen()
-                        }
+                }
 
                         composable(Screen.Browser.route) {
                             InAppBrowserScreen(
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.MyAutomations.route) {
                             MyAutomationsScreen(
-                                onNavigateToEdit = { id -> navController.navigate(Screen.WorkflowEditor.createRoute(id)) },
-                                onNavigateToCreate = { navController.navigate("workflow_editor/new") },
-                                onNavigateToRecord = { navController.navigate(Screen.Recorder.route) }
+                                onNavigateToEdit = { id -> navController.navigate(Screen.WorkflowEditor.createRoute(id))},
+                                onNavigateToCreate = { navController.navigate("workflow_editor/new")},
+                                onNavigateToRecord = { navController.navigate(Screen.Recorder.route)}
                             )
-                        }
+                }
 
                         composable(
                             route = Screen.WorkflowEditor.route,
-                            arguments = listOf(navArgument("automationId") { type = NavType.StringType })
+                            arguments = listOf(navArgument("automationId") { type = NavType.StringType})
                         ) { backStackEntry ->
                             val id = backStackEntry.arguments?.getString("automationId")
                             WorkflowEditorScreen(
                                 automationId = id,
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.Recorder.route) {
                             RecorderScreen(
-                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateBack = { navController.popBackStack()},
                                 onNavigateToEdit = { id ->
                                     navController.popBackStack()
                                     navController.navigate(Screen.WorkflowEditor.createRoute(id))
-                                }
-                            )
                         }
+                            )
+                }
 
                         composable(Screen.ExecutionHistory.route) {
                             ExecutionHistoryScreen(
-                                onNavigateBack = { navController.popBackStack() },
-                                onNavigateToDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id)) }
+                                onNavigateBack = { navController.popBackStack()},
+                                onNavigateToDetails = { id -> navController.navigate(Screen.FailureDetails.createRoute(id))}
                             )
-                        }
+                }
 
                         composable(
                             route = Screen.FailureDetails.route,
-                            arguments = listOf(navArgument("logId") { type = NavType.StringType })
+                            arguments = listOf(navArgument("logId") { type = NavType.StringType})
                         ) { backStackEntry ->
                             val logId = backStackEntry.arguments?.getString("logId") ?: "latest"
                             FailureDetailsScreen(
                                 logId = logId,
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.BankingProtection.route) {
                             BankingProtectionScreen(
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.PermissionsDashboard.route) {
                             PermissionsDashboardScreen(
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.WorkflowBackup.route) {
                             WorkflowBackupScreen(
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.CredentialManager.route) {
                             CredentialManagerScreen(
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
 
                         composable(Screen.Settings.route) {
                             SettingsScreen(
-                                onNavigateToCredentials = { navController.navigate(Screen.CredentialManager.route) },
-                                onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route) },
-                                onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route) },
-                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route) },
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateToCredentials = { navController.navigate(Screen.CredentialManager.route)},
+                                onNavigateToBankingProtection = { navController.navigate(Screen.BankingProtection.route)},
+                                onNavigateToPermissions = { navController.navigate(Screen.PermissionsDashboard.route)},
+                                onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route)},
+                                onNavigateBack = { navController.popBackStack()}
                             )
-                        }
+                }
                     }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (shouldAutoListen(intent)) {
+            autoListenTrigger++
+        }
+    }
+
+    private fun shouldAutoListen(intent: Intent?): Boolean {
+        val isListenDeepLink = intent?.data?.scheme == "voiceagent" && intent.data?.host == "listen"
+        return isListenDeepLink || SafeModeManager.isAutoListenOnLaunchEnabled(this)
     }
 }

@@ -349,24 +349,11 @@ object AutomationExecutionEngine {
         when (step.actionType) {
             ActionType.LAUNCH_APP -> {
                 val pkg = step.targetPackage ?: return StepResult(false, "Target package is not specified", actionAttempted = false, elementFound = false)
-                var launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
-
-                // Fallback for browsers: If requested browser isn't installed, launch the default web browser
-                if (launchIntent == null && (pkg.contains("firefox", ignoreCase = true) || pkg.contains("chrome", ignoreCase = true) || pkg.contains("browser", ignoreCase = true))) {
-                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("http://")).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    if (browserIntent.resolveActivity(context.packageManager) != null) {
-                        context.startActivity(browserIntent)
-                        return StepResult(true, actionAttempted = true, actionConfirmed = true)
-                    }
-                }
-
-                if (launchIntent == null) {
+                val launched = launchTargetPackage(context, pkg)
+                if (!launched) {
                     return StepResult(false, "Application '$pkg' is not installed on this device", actionAttempted = false, elementFound = false)
                 }
-                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(launchIntent)
+                waitForAppWindow(service, context.packageName, pkg)
                 return StepResult(true, actionAttempted = true, actionConfirmed = true)
             }
 
@@ -393,6 +380,7 @@ object AutomationExecutionEngine {
                 }
                 try {
                     context.startActivity(intent)
+                    waitForAppWindow(service, context.packageName, expectedPackage = null)
                     return StepResult(true, actionAttempted = true, actionConfirmed = true)
                 } catch (e: Exception) {
                     return StepResult(false, "Failed to open URL '$urlStr': ${e.message}", actionAttempted = true, elementFound = false)
@@ -416,6 +404,7 @@ object AutomationExecutionEngine {
 
             ActionType.WAIT_FOR_ELEMENT -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
+                ensureTargetAppInForeground(context, service, step)
                 val node = waitForNode(service, step)
                 return if (node != null) {
                     StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
@@ -428,6 +417,7 @@ object AutomationExecutionEngine {
 
             ActionType.CLICK_ELEMENT -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
+                ensureTargetAppInForeground(context, service, step)
                 val node = waitForNode(service, step)
                 if (node != null) {
                     val clicked = service.clickNode(node)
@@ -455,6 +445,7 @@ object AutomationExecutionEngine {
 
             ActionType.SET_TEXT -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
+                ensureTargetAppInForeground(context, service, step)
                 val node = waitForNode(service, step)
                 if (node == null) {
                     val snapshot = service.dumpVisibleScreenNodes()
@@ -471,6 +462,7 @@ object AutomationExecutionEngine {
                 val key = step.credentialKey ?: return StepResult(false, "Credential key is not specified", actionAttempted = false, elementFound = false)
                 val cred = db.credentialDao().getCredentialByKey(key) ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
                 val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
+                ensureTargetAppInForeground(context, service, step)
                 val node = waitForNode(service, step)
                 if (node == null) {
                     val snapshot = service.dumpVisibleScreenNodes()
@@ -591,6 +583,72 @@ object AutomationExecutionEngine {
                 }
             }
         } ?: false
+    }
+
+    private fun launchTargetPackage(context: Context, pkg: String): Boolean {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
+        if (launchIntent != null) {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(launchIntent)
+            return true
+        }
+        // Fallback for browsers: If requested browser isn't installed, launch the default web browser
+        if (pkg.contains("firefox", ignoreCase = true) || pkg.contains("chrome", ignoreCase = true) || pkg.contains("browser", ignoreCase = true)) {
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("http://")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (browserIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(browserIntent)
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * If the workflow is still sitting inside VoiceAgent's own UI when a step targets an external app,
+     * automatically launch that target app and wait for its window to come to the foreground.
+     */
+    private suspend fun ensureTargetAppInForeground(
+        context: Context,
+        service: VoiceAccessibilityService,
+        step: AutomationStep
+    ) {
+        val targetPkg = step.targetPackage?.takeIf { it.isNotBlank() } ?: return
+        if (targetPkg == context.packageName) return
+
+        val activePkg = service.rootInActiveWindow?.packageName?.toString()
+        if (activePkg == context.packageName) {
+            Log.i(TAG, "Still in VoiceAgent UI before step '${step.title}'; auto-launching '$targetPkg'")
+            if (launchTargetPackage(context, targetPkg)) {
+                waitForAppWindow(service, context.packageName, targetPkg)
+            }
+        }
+    }
+
+    private suspend fun waitForAppWindow(
+        service: VoiceAccessibilityService?,
+        ownPackage: String,
+        expectedPackage: String?,
+        timeoutMs: Long = 5000L
+    ): Boolean {
+        if (service == null) {
+            delay(1200L)
+            return false
+        }
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            if (isStopRequested) return false
+            val activePkg = service.rootInActiveWindow?.packageName?.toString()
+            val matched = if (expectedPackage != null) {
+                activePkg == expectedPackage
+            } else {
+                activePkg != null && activePkg != ownPackage
+            }
+            if (matched) return true
+            delay(200)
+        }
+        return false
     }
 
     private suspend fun waitForNode(

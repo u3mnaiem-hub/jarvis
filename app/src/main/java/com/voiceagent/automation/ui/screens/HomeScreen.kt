@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
+    autoListenTrigger: Int = 0,
     onNavigateToCreate: () -> Unit,
     onNavigateToMyAutomations: () -> Unit,
     onNavigateToHistory: () -> Unit,
@@ -87,6 +88,22 @@ fun HomeScreen(
     ) { granted ->
         if (granted) {
             voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
+        }
+    }
+
+    // Automatically start listening when opened via Google Assistant / deep link / app launch
+    LaunchedEffect(autoListenTrigger) {
+        if (autoListenTrigger > 0) {
+            kotlinx.coroutines.delay(350)
+            val hasAudioPerm = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasAudioPerm) {
+                voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
+            } else {
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
         }
     }
 
@@ -205,7 +222,7 @@ fun HomeScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "حماية إنستاباي والبنوك نشطة",
+                                text = "منع أتمتة إنستاباي والبنوك نشط",
                                 fontWeight = FontWeight.Bold,
                                 color = Emerald900,
                                 fontSize = 13.sp
@@ -215,10 +232,35 @@ fun HomeScreen(
                             }
                         }
                         Text(
-                            text = "الأوامر والربط المباشر مع مصروفي تعمل بأمان تام دون المساس بتطبيقات البنوك.",
+                            text = "لا يتدخل في تطبيقات البنوك. لتشغيل إنستاباي قد تحتاج لإيقاف الـ Accessibility مؤقتاً.",
                             color = Slate600,
                             fontSize = 11.sp
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            onClick = {
+                                val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            },
+                            color = Emerald100,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.AccessibilityNew, contentDescription = null, tint = Emerald700, modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = if (isServiceConnected) "إيقاف/إعدادات الـ Accessibility مؤقتاً" else "تفعيل الـ Accessibility",
+                                    color = Emerald900,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                     Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Emerald700)
                 }

@@ -14,6 +14,7 @@ object SafeModeManager {
     private const val KEY_ADVANCED_MODE_ENABLED = "advanced_automation_mode_enabled"
     private const val KEY_TTS_ENABLED = "tts_feedback_enabled"
     private const val KEY_VOICE_LANGUAGE = "voice_recognition_language"
+    private const val KEY_AUTO_LISTEN_ON_LAUNCH = "auto_listen_on_launch"
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -45,5 +46,13 @@ object SafeModeManager {
 
     fun setVoiceLanguage(context: Context, languageCode: String) {
         getPrefs(context).edit().putString(KEY_VOICE_LANGUAGE, languageCode).apply()
+    }
+
+    fun isAutoListenOnLaunchEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_AUTO_LISTEN_ON_LAUNCH, true)
+    }
+
+    fun setAutoListenOnLaunchEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_AUTO_LISTEN_ON_LAUNCH, enabled).apply()
     }
 }

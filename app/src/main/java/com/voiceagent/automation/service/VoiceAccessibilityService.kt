@@ -59,6 +59,7 @@ class VoiceAccessibilityService : AccessibilityService() {
 
         when (eventType) {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                ensureLaunchStepRecorded(packageName)
                 val resId = source.viewIdResourceName
                 val text = source.text?.toString() ?: event.text.firstOrNull()?.toString()
                 val desc = source.contentDescription?.toString()
@@ -84,6 +85,7 @@ class VoiceAccessibilityService : AccessibilityService() {
                 AutomationRecorderEngine.addRecordedStep(step)
             }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+                ensureLaunchStepRecorded(packageName)
                 val resId = source.viewIdResourceName
                 // Read source.text first if available (contains full string), otherwise event.text
                 val text = source.text?.toString() ?: event.text.joinToString("")
@@ -109,6 +111,40 @@ class VoiceAccessibilityService : AccessibilityService() {
                 Log.d(TAG, "Window changed: $packageName / $activityName")
             }
         }
+    }
+
+    /**
+     * Ensures a LAUNCH_APP step is recorded when the user switches into a launchable external app
+     * so replaying the recorded workflow doesn't remain stuck inside VoiceAgent's UI.
+     */
+    private fun ensureLaunchStepRecorded(packageName: String) {
+        val lastPkg = AutomationRecorderEngine.recordedStepsFlow.value.lastOrNull()?.targetPackage
+        if (lastPkg == packageName) return
+
+        val homePkg = packageManager.resolveActivity(
+            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME),
+            0
+        )?.activityInfo?.packageName
+        if (packageName == homePkg || packageName == "com.android.systemui") return
+
+        if (packageManager.getLaunchIntentForPackage(packageName) == null) return
+
+        val appLabel = try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            packageName
+        }
+
+        AutomationRecorderEngine.addRecordedStep(
+            AutomationStep(
+                title = "Open $appLabel",
+                description = "Launch $packageName",
+                actionType = ActionType.LAUNCH_APP,
+                targetPackage = packageName,
+                delayAfterMs = 1500L
+            )
+        )
     }
 
     override fun onInterrupt() {

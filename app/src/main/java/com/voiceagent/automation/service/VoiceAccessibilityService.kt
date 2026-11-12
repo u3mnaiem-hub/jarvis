@@ -64,8 +64,11 @@ class VoiceAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 ensureLaunchStepRecorded(packageName)
                 val resId = source.viewIdResourceName
-                val text = source.text?.toString() ?: event.text.firstOrNull()?.toString()
-                val desc = source.contentDescription?.toString()
+                val rawText = source.text?.toString()?.takeIf { it.isNotBlank() }
+                    ?: event.text.firstOrNull()?.toString()?.takeIf { it.isNotBlank() }
+                val desc = source.contentDescription?.toString()?.takeIf { it.isNotBlank() }
+                val childLabel = if (rawText == null && desc == null) extractFirstChildLabel(source) else null
+                val text = rawText ?: childLabel
                 val className = source.className?.toString()
 
                 // If clicking an editable input that already has text (e.g. prefilled/autofilled credentials)
@@ -122,7 +125,20 @@ class VoiceAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun isInsideWebView(node: AccessibilityNodeInfo): Boolean {
+    private fun extractFirstChildLabel(node: AccessibilityNodeInfo, depth: Int = 0): String? {
+        if (depth > 3) return null
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val t = child.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
+                ?: child.contentDescription?.toString()?.trim()?.takeIf { it.isNotBlank() }
+            if (t != null) return t
+            val nested = extractFirstChildLabel(child, depth + 1)
+            if (nested != null) return nested
+        }
+        return null
+    }
+
+    fun isInsideWebView(node: AccessibilityNodeInfo): Boolean {
         var current: AccessibilityNodeInfo? = node
         var depth = 0
         while (current != null && depth < 12) {
@@ -227,23 +243,26 @@ class VoiceAccessibilityService : AccessibilityService() {
             return node
         }
 
-        // 2. Try single text or placeholder match
+        var selfMatch: AccessibilityNodeInfo? = null
+
+        // 2. Try single text, contentDescription, or placeholder match
         if (!text.isNullOrBlank()) {
             val nodeText = node.text?.toString()?.trim()
+            val nodeDesc = node.contentDescription?.toString()?.trim()
             val hintText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 node.hintText?.toString()?.trim()
             } else null
 
-            if (!nodeText.isNullOrBlank() && (nodeText.contains(text, ignoreCase = true) || (nodeText.length >= 2 && text.contains(nodeText, ignoreCase = true)))) {
-                return node
-            }
-            if (!hintText.isNullOrBlank() && (hintText.contains(text, ignoreCase = true) || (hintText.length >= 2 && text.contains(hintText, ignoreCase = true)))) {
-                return node
+            if ((!nodeText.isNullOrBlank() && (nodeText.contains(text, ignoreCase = true) || (nodeText.length >= 2 && text.contains(nodeText, ignoreCase = true)))) ||
+                (!nodeDesc.isNullOrBlank() && (nodeDesc.contains(text, ignoreCase = true) || (nodeDesc.length >= 2 && text.contains(nodeDesc, ignoreCase = true)))) ||
+                (!hintText.isNullOrBlank() && (hintText.contains(text, ignoreCase = true) || (hintText.length >= 2 && text.contains(hintText, ignoreCase = true))))
+            ) {
+                selfMatch = node
             }
         }
 
         // 3. Try multi-candidate text matches (e.g. ["Login", "Log in", "Sign in", "تسجيل الدخول", "دخول"])
-        if (candidateTexts.isNotEmpty()) {
+        if (selfMatch == null && candidateTexts.isNotEmpty()) {
             val nodeText = node.text?.toString()?.trim()
             val nodeDesc = node.contentDescription?.toString()?.trim()
             val hintText = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -252,31 +271,42 @@ class VoiceAccessibilityService : AccessibilityService() {
 
             for (cand in candidateTexts) {
                 if (cand.isBlank()) continue
-                if (!nodeText.isNullOrBlank() && (nodeText.contains(cand, ignoreCase = true) || (nodeText.length >= 2 && cand.contains(nodeText, ignoreCase = true)))) {
-                    return node
-                }
-                if (!nodeDesc.isNullOrBlank() && (nodeDesc.contains(cand, ignoreCase = true) || (nodeDesc.length >= 2 && cand.contains(nodeDesc, ignoreCase = true)))) {
-                    return node
-                }
-                if (!hintText.isNullOrBlank() && (hintText.contains(cand, ignoreCase = true) || (hintText.length >= 2 && cand.contains(hintText, ignoreCase = true)))) {
-                    return node
+                if ((!nodeText.isNullOrBlank() && (nodeText.contains(cand, ignoreCase = true) || (nodeText.length >= 2 && cand.contains(nodeText, ignoreCase = true)))) ||
+                    (!nodeDesc.isNullOrBlank() && (nodeDesc.contains(cand, ignoreCase = true) || (nodeDesc.length >= 2 && cand.contains(nodeDesc, ignoreCase = true)))) ||
+                    (!hintText.isNullOrBlank() && (hintText.contains(cand, ignoreCase = true) || (hintText.length >= 2 && cand.contains(hintText, ignoreCase = true))))
+                ) {
+                    selfMatch = node
+                    break
                 }
             }
         }
 
         // 4. Try content description
-        if (!contentDesc.isNullOrBlank()) {
+        if (selfMatch == null && !contentDesc.isNullOrBlank()) {
             val nodeDesc = node.contentDescription?.toString()
             if (nodeDesc != null && nodeDesc.contains(contentDesc, ignoreCase = true)) {
-                return node
+                selfMatch = node
             }
         }
 
-        // 5. Try class name if no other specific filter
-        if (resId.isNullOrBlank() && text.isNullOrBlank() && contentDesc.isNullOrBlank() && candidateTexts.isEmpty() && !className.isNullOrBlank()) {
-            if (node.className?.toString()?.equals(className, ignoreCase = true) == true) {
-                return node
+        // 5. Try class name only for specific widgets (never generic View/Layout containers so circles/icons fall back to coordinates)
+        if (selfMatch == null && resId.isNullOrBlank() && text.isNullOrBlank() && contentDesc.isNullOrBlank() && candidateTexts.isEmpty() && !className.isNullOrBlank()) {
+            val genericContainers = setOf(
+                "android.view.View",
+                "android.view.ViewGroup",
+                "android.widget.FrameLayout",
+                "android.widget.LinearLayout",
+                "android.widget.RelativeLayout",
+                "android.webkit.WebView"
+            )
+            if (className !in genericContainers && node.className?.toString()?.equals(className, ignoreCase = true) == true) {
+                selfMatch = node
             }
+        }
+
+        // Prefer clickable/actionable node if selfMatch is a non-clickable header/label above a real button
+        if (selfMatch != null && (selfMatch.isClickable || selfMatch.className?.toString()?.contains("Button", ignoreCase = true) == true)) {
+            return selfMatch
         }
 
         // Recurse children
@@ -286,7 +316,7 @@ class VoiceAccessibilityService : AccessibilityService() {
             if (found != null) return found
         }
 
-        return null
+        return selfMatch
     }
 
     fun clickNode(node: AccessibilityNodeInfo): Boolean {

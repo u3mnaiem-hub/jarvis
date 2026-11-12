@@ -420,10 +420,28 @@ object AutomationExecutionEngine {
                 ensureTargetAppInForeground(context, service, step)
                 val node = waitForNode(service, step)
                 if (node != null) {
-                    val clicked = service.clickNode(node)
+                    // Ensure button/circle is scrolled into view (especially if soft keyboard was open)
+                    try {
+                        node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SHOW_ON_SCREEN)
+                        delay(100)
+                    } catch (_: Exception) {}
+
+                    val center = service.getNodeCenter(node)
+                    val pkg = node.packageName?.toString()?.lowercase() ?: ""
+                    val isBrowserOrWeb = service.isInsideWebView(node) ||
+                        pkg.contains("chrome") || pkg.contains("firefox") || pkg.contains("mozilla") ||
+                        pkg.contains("edge") || pkg.contains("sbrowser") || pkg.contains("opera") ||
+                        node.isCheckable
+
+                    val clicked = if (isBrowserOrWeb && center != null) {
+                        // Real touch gesture is far more reliable than ACTION_CLICK on WebView/browser buttons & radio circles
+                        awaitClickCoordinates(service, center.first, center.second) || service.clickNode(node)
+                    } else {
+                        service.clickNode(node) || (center != null && awaitClickCoordinates(service, center.first, center.second))
+                    }
                     return StepResult(clicked, if (clicked) null else "Found element but failed to click node", elementFound = true, actionAttempted = true, actionConfirmed = clicked)
                 }
-                // Fallback to screen coordinates if provided
+                // Fallback to screen coordinates if provided (e.g. unlabeled circle/icon)
                 if (step.clickX != null && step.clickY != null) {
                     val clicked = awaitClickCoordinates(service, step.clickX, step.clickY)
                     return StepResult(clicked, if (clicked) null else "Coordinate tap gesture was cancelled", elementFound = false, actionAttempted = true, actionConfirmed = clicked)

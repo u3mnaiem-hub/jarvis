@@ -2,7 +2,10 @@ package com.voiceagent.automation.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.net.http.SslError
+import android.os.Build
 import android.webkit.*
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +31,11 @@ fun InAppBrowserScreen(
     var isLoading by remember { mutableStateOf(false) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(false) }
+
+    // Intercept device back button: go back in web history if possible, else pop screen
+    BackHandler(enabled = canGoBack) {
+        webViewInstance?.goBack()
+    }
 
     Scaffold(
         topBar = {
@@ -99,6 +107,11 @@ fun InAppBrowserScreen(
                         settings.useWideViewPort = true
                         settings.builtInZoomControls = true
                         settings.displayZoomControls = false
+                        settings.databaseEnabled = true
+                        settings.javaScriptCanOpenWindowsAutomatically = true
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        }
 
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -114,6 +127,12 @@ fun InAppBrowserScreen(
 
                             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                                 isLoading = false
+                            }
+
+                            @SuppressLint("WebViewClientOnReceivedSslError")
+                            override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                                // Router config pages (e.g. 192.168.1.1) commonly use self-signed SSL certs
+                                handler?.proceed()
                             }
                         }
                         webChromeClient = WebChromeClient()

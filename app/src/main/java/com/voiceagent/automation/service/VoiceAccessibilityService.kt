@@ -31,13 +31,6 @@ class VoiceAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        instance = null
-        _isServiceConnected.value = false
-        Log.i(TAG, "VoiceAccessibilityService destroyed")
-    }
-
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         

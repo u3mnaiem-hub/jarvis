@@ -44,9 +44,6 @@ class VoiceAccessibilityService : AccessibilityService() {
         val eventType = event.eventType
         val packageName = event.packageName?.toString() ?: return
 
-        // Skip events coming from our own Voice Agent app
-        if (packageName == applicationContext.packageName) return
-
         // CRITICAL BANKING PROTECTION: Block any event from financial/banking applications immediately
         if (com.voiceagent.automation.security.BankingProtectionManager.isPackageProtected(applicationContext, packageName)) {
             Log.w(TAG, "Banking Protection active: Dropped event from sensitive package $packageName")
@@ -54,6 +51,12 @@ class VoiceAccessibilityService : AccessibilityService() {
         }
 
         val source = event.source ?: return
+
+        // Skip events coming from our own Voice Agent app UI, EXCEPT inside the In-App Browser WebView
+        if (packageName == applicationContext.packageName && !isInsideWebView(source)) {
+            return
+        }
+
         val bounds = Rect()
         source.getBoundsInScreen(bounds)
 
@@ -90,6 +93,10 @@ class VoiceAccessibilityService : AccessibilityService() {
                 // Read source.text first if available (contains full string), otherwise event.text
                 val text = source.text?.toString() ?: event.text.joinToString("")
                 val desc = source.contentDescription?.toString()
+                val hint = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    source.hintText?.toString()
+                } else null
+                val className = source.className?.toString()
 
                 if (text.isNotBlank()) {
                     val step = AutomationStep(
@@ -98,7 +105,9 @@ class VoiceAccessibilityService : AccessibilityService() {
                         actionType = ActionType.SET_TEXT,
                         targetPackage = packageName,
                         selectorResourceId = resId,
+                        selectorText = hint,
                         selectorContentDescription = desc,
+                        selectorClassName = className,
                         textPayload = text,
                         clickX = bounds.centerX().toFloat(),
                         clickY = bounds.centerY().toFloat()
@@ -113,11 +122,26 @@ class VoiceAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun isInsideWebView(node: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (current != null && depth < 12) {
+            val cls = current.className?.toString() ?: ""
+            if (cls.contains("WebView", ignoreCase = true)) {
+                return true
+            }
+            current = current.parent
+            depth++
+        }
+        return false
+    }
+
     /**
      * Ensures a LAUNCH_APP step is recorded when the user switches into a launchable external app
      * so replaying the recorded workflow doesn't remain stuck inside VoiceAgent's UI.
      */
     private fun ensureLaunchStepRecorded(packageName: String) {
+        if (packageName == applicationContext.packageName) return
         val lastPkg = AutomationRecorderEngine.recordedStepsFlow.value.lastOrNull()?.targetPackage
         if (lastPkg == packageName) return
 
@@ -279,6 +303,25 @@ class VoiceAccessibilityService : AccessibilityService() {
         node.getBoundsInScreen(bounds)
         if (bounds.isEmpty) return false
         return clickCoordinates(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+    }
+
+    fun findFocusedInputNode(): AccessibilityNodeInfo? {
+        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { return it }
+        try {
+            for (window in windows) {
+                window.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { return it }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error finding focused input node: ${e.message}")
+        }
+        return null
+    }
+
+    fun getNodeCenter(node: AccessibilityNodeInfo): Pair<Float, Float>? {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        if (bounds.isEmpty) return null
+        return bounds.centerX().toFloat() to bounds.centerY().toFloat()
     }
 
     fun setTextOnNode(node: AccessibilityNodeInfo, text: String): Boolean {

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,7 +34,8 @@ import java.util.UUID
 @Composable
 fun RecorderScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToEdit: (String) -> Unit
+    onNavigateToEdit: (String) -> Unit,
+    onNavigateToBrowser: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -44,9 +46,9 @@ fun RecorderScreen(
     val recordedSteps by AutomationRecorderEngine.recordedStepsFlow.collectAsState()
     val isServiceConnected by VoiceAccessibilityService.isServiceConnected.collectAsState()
 
-    var workflowName by remember { mutableStateOf("") }
-    var workflowNameAr by remember { mutableStateOf("") }
-    var voicePhrase by remember { mutableStateOf("") }
+    var workflowName by rememberSaveable { mutableStateOf("") }
+    var workflowNameAr by rememberSaveable { mutableStateOf("") }
+    var voicePhrase by rememberSaveable { mutableStateOf("") }
 
     var isManualStepDialogVisible by remember { mutableStateOf(false) }
 
@@ -136,6 +138,22 @@ fun RecorderScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("بدء تسجيل الشاشة الآن", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            if (!isRecording) {
+                                AutomationRecorderEngine.startRecording(workflowName.ifBlank { "Recorded Workflow" })
+                            }
+                            onNavigateToBrowser()
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                        Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("فتح المتصفح المدمج للتسجيل (مع بقاء المهمة)", fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
                     }
 
                     // Actions Row: Manual Step + Save

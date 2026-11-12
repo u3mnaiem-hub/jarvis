@@ -162,7 +162,8 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToEdit = { id ->
                                     navController.popBackStack()
                                     navController.navigate(Screen.WorkflowEditor.createRoute(id))
-                        }
+                                },
+                                onNavigateToBrowser = { navController.navigate(Screen.Browser.route) }
                             )
                 }
 

@@ -446,15 +446,14 @@ object AutomationExecutionEngine {
             ActionType.SET_TEXT -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
                 ensureTargetAppInForeground(context, service, step)
-                val node = waitForNode(service, step)
-                if (node == null) {
-                    val snapshot = service.dumpVisibleScreenNodes()
-                    val snapInfo = if (snapshot.isNotEmpty()) "\n[Diagnostic] Visible elements on screen were: " + snapshot.joinToString(" | ") else ""
-                    return StepResult(false, "Input field '${step.selectorText ?: step.selectorResourceId}' not found.$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
-                }
                 val text = step.textPayload ?: ""
-                val success = service.setTextOnNode(node, text)
-                return StepResult(success, if (success) null else "Failed to enter text on node", elementFound = true, actionAttempted = true, actionConfirmed = success)
+                return performTextInput(
+                    service = service,
+                    step = step,
+                    text = text,
+                    notFoundMsg = "Input field '${step.selectorText ?: step.selectorResourceId}' not found.",
+                    failedMsg = "Failed to enter text on node"
+                )
             }
 
             ActionType.INJECT_CREDENTIAL -> {
@@ -463,15 +462,17 @@ object AutomationExecutionEngine {
                 val cred = db.credentialDao().getCredentialByKey(key) ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
                 val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
                 ensureTargetAppInForeground(context, service, step)
-                val node = waitForNode(service, step)
-                if (node == null) {
-                    val snapshot = service.dumpVisibleScreenNodes()
-                    val snapInfo = if (snapshot.isNotEmpty()) "\n[Diagnostic] Visible elements on screen were: " + snapshot.joinToString(" | ") else ""
-                    return StepResult(false, "Password input field not found.$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                val result = performTextInput(
+                    service = service,
+                    step = step,
+                    text = decryptedPassword,
+                    notFoundMsg = "Password input field not found.",
+                    failedMsg = "Failed to inject password into input field"
+                )
+                if (result.success) {
+                    db.credentialDao().updateLastUsed(key, System.currentTimeMillis())
                 }
-                val success = service.setTextOnNode(node, decryptedPassword)
-                db.credentialDao().updateLastUsed(key, System.currentTimeMillis())
-                return StepResult(success, if (success) null else "Failed to inject password into input field", elementFound = true, actionAttempted = true, actionConfirmed = success)
+                return result
             }
 
             ActionType.CLEAR_TEXT -> {
@@ -649,6 +650,55 @@ object AutomationExecutionEngine {
             delay(200)
         }
         return false
+    }
+
+    private suspend fun performTextInput(
+        service: VoiceAccessibilityService,
+        step: AutomationStep,
+        text: String,
+        notFoundMsg: String,
+        failedMsg: String
+    ): StepResult {
+        val node = waitForNode(service, step)
+        if (node != null) {
+            if (service.setTextOnNode(node, text)) {
+                return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+            }
+            // Tap node center (or recorded coordinates) to focus browser/WebView inputs, then retry
+            val tapTarget = service.getNodeCenter(node)
+                ?: if (step.clickX != null && step.clickY != null) step.clickX to step.clickY else null
+            if (tapTarget != null) {
+                awaitClickCoordinates(service, tapTarget.first, tapTarget.second)
+                delay(300)
+                val targetNode = service.findFocusedInputNode() ?: node
+                val retried = service.setTextOnNode(targetNode, text)
+                return StepResult(retried, if (retried) null else failedMsg, elementFound = true, actionAttempted = true, actionConfirmed = retried)
+            }
+            return StepResult(false, failedMsg, elementFound = true, actionAttempted = true, actionConfirmed = false)
+        }
+
+        // Coordinate fallback when web input node has no stable resourceId/text
+        if (step.clickX != null && step.clickY != null) {
+            val tapped = awaitClickCoordinates(service, step.clickX, step.clickY)
+            if (tapped) {
+                delay(350)
+                val focusedNode = service.findFocusedInputNode() ?: service.findNode(
+                    resourceId = step.selectorResourceId,
+                    text = step.selectorText,
+                    contentDesc = step.selectorContentDescription,
+                    className = step.selectorClassName,
+                    candidateTexts = step.candidateTexts
+                )
+                if (focusedNode != null) {
+                    val success = service.setTextOnNode(focusedNode, text)
+                    return StepResult(success, if (success) null else failedMsg, elementFound = true, actionAttempted = true, actionConfirmed = success)
+                }
+            }
+        }
+
+        val snapshot = service.dumpVisibleScreenNodes()
+        val snapInfo = if (snapshot.isNotEmpty()) "\n[Diagnostic] Visible elements on screen were: " + snapshot.joinToString(" | ") else ""
+        return StepResult(false, "$notFoundMsg$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
     }
 
     private suspend fun waitForNode(

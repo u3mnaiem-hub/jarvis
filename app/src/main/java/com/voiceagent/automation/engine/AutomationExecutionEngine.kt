@@ -80,6 +80,7 @@ object AutomationExecutionEngine {
 
             val isWebMacro = automation.macroType == MacroType.WEB_MACRO
             var webEngine: WebMacroEngine? = if (isWebMacro) WebMacroEngine(context) else null
+            var lastWaitedElementText: String? = null
 
             try {
                 // Only ScreenMacro steps require AccessibilityService (WebMacro runs inside app WebView)
@@ -221,13 +222,18 @@ object AutomationExecutionEngine {
                         if (isStopRequested) break
                         actualRetries = attempt - 1
                         try {
-                            val result = executeSingleStep(context, service, db, step, webEngine)
+                            val result = executeSingleStep(context, service, db, step, webEngine, lastWaitedElementText)
                             stepSuccess = result.success
                             stepError = result.errorMessage
                             actionAttempted = result.actionAttempted
                             actionConfirmed = result.actionConfirmed
                             elementFound = result.elementFound
-                            if (stepSuccess) break
+                            if (stepSuccess) {
+                                if (step.actionType == ActionType.WAIT_FOR_ELEMENT && !step.selectorText.isNullOrBlank()) {
+                                    lastWaitedElementText = step.selectorText
+                                }
+                                break
+                            }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
@@ -356,7 +362,8 @@ object AutomationExecutionEngine {
         webEngine: WebMacroEngine,
         db: VoiceAgentDatabase,
         step: AutomationStep,
-        context: Context
+        context: Context,
+        lastWaitedElementText: String? = null
     ): StepResult {
         val cssSelectors = buildList {
             step.cssSelector?.takeIf { it.isNotBlank() }?.let { add(it) }
@@ -426,7 +433,17 @@ object AutomationExecutionEngine {
 
             ActionType.CLICK_ELEMENT -> {
                 val isLogin = isLoginOrSubmitStep(step)
-                val ok = webEngine.clickElement(cssSelectors, textCandidates, timeoutMs, tryLoginFallback = isLogin)
+                val rowTarget = step.rowContextText?.takeIf { it.isNotBlank() }
+                    ?: lastWaitedElementText?.takeIf {
+                        textCandidates.any { t ->
+                            t.lowercase() in listOf("on", "off", "allow", "block", "enable", "disable", "تفعيل", "تعطيل", "سماح", "حظر")
+                        }
+                    }
+                val ok = if (rowTarget != null && textCandidates.isNotEmpty()) {
+                    webEngine.clickInRow(rowTarget, textCandidates, timeoutMs)
+                } else {
+                    webEngine.clickElement(cssSelectors, textCandidates, timeoutMs, tryLoginFallback = isLogin)
+                }
                 if (ok && isLogin) {
                     delay(800)
                     val conflict = webEngine.checkSessionConflict()
@@ -457,7 +474,8 @@ object AutomationExecutionEngine {
         service: VoiceAccessibilityService?,
         db: VoiceAgentDatabase,
         step: AutomationStep,
-        webEngine: WebMacroEngine? = null
+        webEngine: WebMacroEngine? = null,
+        lastWaitedElementText: String? = null
     ): StepResult {
         if (webEngine != null && step.actionType in listOf(
                 ActionType.OPEN_URL,
@@ -468,7 +486,7 @@ object AutomationExecutionEngine {
                 ActionType.PRESS_ENTER
             )
         ) {
-            return executeWebStep(webEngine, db, step, context)
+            return executeWebStep(webEngine, db, step, context, lastWaitedElementText)
         }
 
         when (step.actionType) {

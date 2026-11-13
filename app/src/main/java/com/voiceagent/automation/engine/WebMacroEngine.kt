@@ -235,6 +235,89 @@ class WebMacroEngine(private val context: Context) {
         return if (tryLoginFallback) submitLoginFormFallback() else false
     }
 
+    /**
+     * Clicks a target control (e.g. "On" / "Off" radio button) scoped specifically to the row
+     * containing [rowText] (e.g. "Toshiba tv", "sharptv") across main document and iframes.
+     */
+    suspend fun clickInRow(
+        rowText: String,
+        targetTexts: List<String>,
+        timeoutMs: Long = 10000L
+    ): Boolean {
+        val ready = waitForElement(emptyList(), listOf(rowText), timeoutMs)
+        if (!ready) return false
+
+        val rowJson = JSONObject.quote(rowText.trim())
+        val targetsJson = JSONArray(targetTexts).toString()
+
+        val js = """
+            (function() {
+                var rowNeedle = $rowJson.toLowerCase();
+                var targetList = $targetsJson.map(function(t) { return (t || '').trim().toLowerCase(); }).filter(Boolean);
+
+                function findRowAndClick(doc) {
+                    if (!doc) return false;
+                    var all = doc.querySelectorAll('tr, div, li, p, span, td');
+                    var bestLabel = null;
+                    for (var i = 0; i < all.length; i++) {
+                        var el = all[i];
+                        var txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (txt === rowNeedle || (txt.indexOf(rowNeedle) !== -1 && txt.length <= rowNeedle.length + 12)) {
+                            if (!bestLabel || txt.length < (bestLabel.innerText || '').length) {
+                                bestLabel = el;
+                            }
+                        }
+                    }
+                    if (bestLabel) {
+                        var container = bestLabel;
+                        for (var depth = 0; depth < 6 && container; depth++) {
+                            var radios = container.querySelectorAll('input[type="radio"], input[type="checkbox"]');
+                            if (radios.length > 0) {
+                                // Match by label text or sibling text
+                                for (var r = 0; r < radios.length; r++) {
+                                    var radio = radios[r];
+                                    var lbl = radio.id ? doc.querySelector('label[for="' + radio.id + '"]') : null;
+                                    var parentText = (lbl ? lbl.innerText : (radio.parentElement ? radio.parentElement.innerText : '') || '').trim().toLowerCase();
+                                    var nextText = (radio.nextSibling && radio.nextSibling.textContent ? radio.nextSibling.textContent : '').trim().toLowerCase();
+                                    var combined = (parentText + ' ' + nextText).trim();
+                                    for (var t = 0; t < targetList.length; t++) {
+                                        if (combined === targetList[t] || combined.indexOf(targetList[t]) !== -1) {
+                                            radio.click();
+                                            radio.dispatchEvent(new Event('change', { bubbles: true }));
+                                            return true;
+                                        }
+                                    }
+                                }
+                                // Positional fallback for ZTE On/Off pair: index 0 = On/Allow, index 1 = Off/Block
+                                if (radios.length >= 2) {
+                                    var wantsOff = targetList.some(function(x) { return x === 'off' || x === 'block' || x === 'disable' || x === 'تعطيل' || x === 'حظر'; });
+                                    var targetRadio = wantsOff ? radios[1] : radios[0];
+                                    targetRadio.click();
+                                    targetRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                            container = container.parentElement;
+                        }
+                    }
+                    var frames = doc.querySelectorAll('iframe, frame');
+                    for (var f = 0; f < frames.length; f++) {
+                        try {
+                            var fDoc = frames[f].contentDocument || frames[f].contentWindow.document;
+                            if (findRowAndClick(fDoc)) return true;
+                        } catch (e) {}
+                    }
+                    return false;
+                }
+                return findRowAndClick(document);
+            })();
+        """.trimIndent()
+
+        val ok = evalJs(js) == "true"
+        if (ok) delay(400)
+        return ok
+    }
+
     suspend fun submitLoginFormFallback(): Boolean {
         val js = """
             (function() {

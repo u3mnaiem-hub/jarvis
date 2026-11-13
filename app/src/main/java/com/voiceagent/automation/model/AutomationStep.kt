@@ -28,6 +28,7 @@ data class AutomationStep(
     val isWebStep: Boolean = false,
     val cssSelector: String? = null,
     val candidateCssSelectors: List<String> = emptyList(),
+    val rowContextText: String? = null,
     
     // Semantic / Multi-text candidate matching (e.g. ["Login", "Log in", "تسجيل الدخول", "دخول"])
     val candidateTexts: List<String> = emptyList(),

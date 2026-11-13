@@ -102,8 +102,8 @@ object DemoWorkflows {
                     description = "Navigates to Parental Control section",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    selectorText = "Parental Control",
-                    candidateTexts = listOf("Parental Control", "التحكم الأبوي", "Device Management"),
+                    selectorText = "Parental Controls",
+                    candidateTexts = listOf("Parental Controls", "Parental Control", "التحكم الأبوي", "Device Management"),
                     timeoutSeconds = 12,
                     delayAfterMs = 800
                 ),
@@ -119,10 +119,11 @@ object DemoWorkflows {
                 AutomationStep(
                     order = 8,
                     title = "Enable TV Internet Access",
-                    description = "Clicks Allow / Enable for $deviceName",
+                    description = "Clicks On / Allow for $deviceName",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    candidateTexts = listOf("Allow", "Enable", "تفعيل", "سماح", "ON"),
+                    rowContextText = deviceName,
+                    candidateTexts = listOf("On", "ON", "Allow", "Enable", "تفعيل", "سماح"),
                     delayAfterMs = 800,
                     spokenMessage = "Enabling TV internet"
                 ),
@@ -245,8 +246,8 @@ object DemoWorkflows {
                     description = "Navigates to Parental Control section",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    selectorText = "Parental Control",
-                    candidateTexts = listOf("Parental Control", "التحكم الأبوي", "Device Management"),
+                    selectorText = "Parental Controls",
+                    candidateTexts = listOf("Parental Controls", "Parental Control", "التحكم الأبوي", "Device Management"),
                     timeoutSeconds = 12,
                     delayAfterMs = 800
                 ),
@@ -262,10 +263,11 @@ object DemoWorkflows {
                 AutomationStep(
                     order = 8,
                     title = "Block TV Internet Access",
-                    description = "Clicks Block / Disable for $deviceName",
+                    description = "Clicks Off / Block for $deviceName",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    candidateTexts = listOf("Block", "Disable", "حظر", "تعطيل", "OFF"),
+                    rowContextText = deviceName,
+                    candidateTexts = listOf("Off", "OFF", "Block", "Disable", "حظر", "تعطيل"),
                     delayAfterMs = 800,
                     spokenMessage = "Blocking TV internet"
                 ),

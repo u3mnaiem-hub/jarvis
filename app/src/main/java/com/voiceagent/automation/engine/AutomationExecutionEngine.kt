@@ -372,7 +372,7 @@ object AutomationExecutionEngine {
                 add(if (id.startsWith("#") || id.startsWith(".")) id else "#$id")
             }
         }
-        val textCandidates = buildList {
+        val textCandidates = buildList<String> {
             step.selectorText?.takeIf { it.isNotBlank() }?.let { add(it) }
             addAll(step.candidateTexts.filter { it.isNotBlank() })
             // Fallback: also include label inferred from "Click: <Name>" title and ZTE #mm/#sm IDs

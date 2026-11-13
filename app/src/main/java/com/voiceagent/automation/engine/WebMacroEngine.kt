@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.http.SslError
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -13,6 +14,9 @@ import android.webkit.WebViewClient
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -74,6 +78,7 @@ class WebMacroEngine(private val context: Context) {
                 }
             }
             webView = this
+            _activeWebViewFlow.value = this
         }
     }
 
@@ -209,6 +214,10 @@ class WebMacroEngine(private val context: Context) {
                 ${FINDER_HELPER_JS}
                 var el = findElementInFrames(document, $cssJson, $textJson, false);
                 if (!el) return false;
+                if (el.closest) {
+                    var clickableAncestor = el.closest('a, button, [role="button"], [onclick]');
+                    if (clickableAncestor) el = clickableAncestor;
+                }
                 try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
                 var docWin = (el.ownerDocument && el.ownerDocument.defaultView) ? el.ownerDocument.defaultView : window;
                 var tag = (el.tagName || '').toUpperCase();
@@ -414,6 +423,8 @@ class WebMacroEngine(private val context: Context) {
     }
 
     suspend fun destroy() = withContext(Dispatchers.Main) {
+        _activeWebViewFlow.value = null
+        (webView?.parent as? ViewGroup)?.removeView(webView)
         webView?.stopLoading()
         webView?.destroy()
         webView = null
@@ -423,37 +434,84 @@ class WebMacroEngine(private val context: Context) {
     companion object {
         private const val TAG = "WebMacroEngine"
 
+        private val _activeWebViewFlow = MutableStateFlow<WebView?>(null)
+        val activeWebViewFlow: StateFlow<WebView?> = _activeWebViewFlow.asStateFlow()
+
         private const val FINDER_HELPER_JS = """
+            function isElementVisible(el) {
+                if (!el) return false;
+                try {
+                    var doc = el.ownerDocument || document;
+                    var win = doc.defaultView || window;
+                    var style = win.getComputedStyle(el);
+                    if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+                        return false;
+                    }
+                    var rects = el.getClientRects();
+                    return !!(rects && rects.length > 0);
+                } catch (e) {
+                    return true;
+                }
+            }
+
+            function getElementLabel(el) {
+                return (
+                    el.innerText ||
+                    el.textContent ||
+                    el.value ||
+                    el.placeholder ||
+                    el.getAttribute('aria-label') ||
+                    el.getAttribute('title') ||
+                    el.getAttribute('alt') ||
+                    ''
+                ).trim().toLowerCase();
+            }
+
+            function matchByText(doc, selector, textList) {
+                var candidates = doc.querySelectorAll(selector);
+                for (var t = 0; t < textList.length; t++) {
+                    var needle = (textList[t] || '').trim().toLowerCase();
+                    if (!needle) continue;
+                    for (var j = 0; j < candidates.length; j++) {
+                        var c = candidates[j];
+                        if (!isElementVisible(c)) continue;
+                        if (getElementLabel(c) === needle) return c;
+                    }
+                    for (var k = 0; k < candidates.length; k++) {
+                        var c2 = candidates[k];
+                        if (!isElementVisible(c2)) continue;
+                        var label2 = getElementLabel(c2);
+                        if (label2 && label2.indexOf(needle) !== -1 && label2.length <= needle.length + 25) {
+                            return c2;
+                        }
+                    }
+                }
+                return null;
+            }
+
             function findElementInFrames(doc, cssList, textList, preferInput) {
                 if (!doc) return null;
                 for (var i = 0; i < cssList.length; i++) {
                     var sel = cssList[i];
                     if (!sel) continue;
                     try {
-                        var el = doc.querySelector(sel);
-                        if (el) return el;
+                        var allCss = doc.querySelectorAll(sel);
+                        for (var v = 0; v < allCss.length; v++) {
+                            if (isElementVisible(allCss[v])) return allCss[v];
+                        }
                     } catch (e) {}
                 }
                 if (textList && textList.length > 0) {
-                    var selector = preferInput
-                        ? 'input, textarea, select'
-                        : 'button, input[type="button"], input[type="submit"], a, [role="button"], div, span, li, td, label';
-                    var candidates = doc.querySelectorAll(selector);
-                    for (var t = 0; t < textList.length; t++) {
-                        var needle = (textList[t] || '').trim().toLowerCase();
-                        if (!needle) continue;
-                        for (var j = 0; j < candidates.length; j++) {
-                            var c = candidates[j];
-                            var label = (c.innerText || c.textContent || c.value || c.placeholder || c.getAttribute('aria-label') || '').trim().toLowerCase();
-                            if (label === needle) return c;
-                        }
-                        for (var k = 0; k < candidates.length; k++) {
-                            var c2 = candidates[k];
-                            var label2 = (c2.innerText || c2.textContent || c2.value || c2.placeholder || c2.getAttribute('aria-label') || '').trim().toLowerCase();
-                            if (label2 && label2.indexOf(needle) !== -1 && label2.length <= needle.length + 25) {
-                                return c2;
-                            }
-                        }
+                    if (preferInput) {
+                        var inp = matchByText(doc, 'input, textarea, select', textList);
+                        if (inp) return inp;
+                    } else {
+                        // Pass 1: prioritize true interactive elements
+                        var interactive = matchByText(doc, 'button, input[type="button"], input[type="submit"], a, [role="button"], [onclick]', textList);
+                        if (interactive) return interactive;
+                        // Pass 2: fallback to visible text containers
+                        var generic = matchByText(doc, 'div, span, li, td, label, p, h1, h2, h3, h4', textList);
+                        if (generic) return generic;
                     }
                 }
                 var frames = doc.querySelectorAll('iframe, frame');

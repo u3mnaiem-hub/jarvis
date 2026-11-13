@@ -2,24 +2,31 @@ package com.voiceagent.automation
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.voiceagent.automation.engine.WebMacroEngine
 import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.ui.navigation.Screen
 import com.voiceagent.automation.ui.screens.*
@@ -107,11 +114,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
                 ) { innerPadding ->
-                    NavHost(
-                        navController = navController,
-                        startDestination = Screen.Home.route,
-                        modifier = Modifier.padding(innerPadding)
+                    val activeWebView by WebMacroEngine.activeWebViewFlow.collectAsState()
+                    var hideLiveWebView by remember(activeWebView) { mutableStateOf(false) }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
                     ) {
+                        NavHost(
+                            navController = navController,
+                            startDestination = Screen.Home.route,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
                         composable(Screen.Home.route) {
                             HomeScreen(
                                 autoListenTrigger = autoListenTrigger,
@@ -218,6 +233,47 @@ class MainActivity : ComponentActivity() {
                                 onNavigateBack = { navController.popBackStack()}
                             )
                 }
+                    }
+
+                        if (activeWebView != null && !hideLiveWebView) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                shadowElevation = 12.dp,
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFF065F46))
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "Live Web Automation",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        TextButton(onClick = { hideLiveWebView = true }) {
+                                            Text("Hide", color = Color.White, fontSize = 12.sp)
+                                        }
+                                    }
+                                    AndroidView(
+                                        factory = {
+                                            activeWebView!!.also { wv ->
+                                                (wv.parent as? ViewGroup)?.removeView(wv)
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -44,6 +44,7 @@ class WebMacroEngine(private val context: Context) {
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
+            layout(0, 0, 1080, 1920)
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
@@ -209,11 +210,15 @@ class WebMacroEngine(private val context: Context) {
                 var el = findElementInFrames(document, $cssJson, $textJson, false);
                 if (!el) return false;
                 try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
-                try { el.click(); } catch (e) {}
+                var docWin = (el.ownerDocument && el.ownerDocument.defaultView) ? el.ownerDocument.defaultView : window;
+                var tag = (el.tagName || '').toUpperCase();
+                if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'A') {
+                    try { el.click(); return true; } catch (e) {}
+                }
                 var events = ['mousedown', 'mouseup', 'click'];
                 for (var i = 0; i < events.length; i++) {
-                    el.dispatchEvent(new MouseEvent(events[i], {
-                        view: window,
+                    el.dispatchEvent(new docWin.MouseEvent(events[i], {
+                        view: docWin,
                         bubbles: true,
                         cancelable: true
                     }));

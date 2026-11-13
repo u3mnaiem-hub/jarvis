@@ -406,7 +406,9 @@ object AutomationExecutionEngine {
 
             ActionType.INJECT_CREDENTIAL -> {
                 val key = step.credentialKey ?: return StepResult(false, "Credential key is not specified", actionAttempted = false, elementFound = false)
-                val cred = db.credentialDao().getCredentialByKey(key) ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
+                val cred = db.credentialDao().getCredentialByKey(key)
+                    ?: (if (key == "router_password") db.credentialDao().getCredentialByKey("router_admin_pass") else null)
+                    ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
                 val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
                 val ok = webEngine.fillField(cssSelectors, textCandidates, decryptedPassword, timeoutMs, isSensitive = true)
                 if (ok) {

@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.voiceagent.automation.engine.AutomationRecorderEngine
 import com.voiceagent.automation.model.ActionType
 import com.voiceagent.automation.model.AutomationStep
@@ -375,6 +376,78 @@ class VoiceAccessibilityService : AccessibilityService() {
     fun scrollNode(node: AccessibilityNodeInfo, forward: Boolean): Boolean {
         val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         return node.performAction(action)
+    }
+
+    fun isSoftKeyboardVisible(): Boolean {
+        return try {
+            windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun dismissSoftKeyboard(): Boolean {
+        if (!isSoftKeyboardVisible()) return false
+        return performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
+    fun getScreenSize(): Pair<Int, Int> {
+        val dm = resources.displayMetrics
+        return dm.widthPixels to dm.heightPixels
+    }
+
+    fun isPointOnScreen(x: Float, y: Float): Boolean {
+        val (w, h) = getScreenSize()
+        var usableBottom = h.toFloat()
+        try {
+            val imeWindow = windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            if (imeWindow != null) {
+                val imeBounds = Rect()
+                imeWindow.getBoundsInScreen(imeBounds)
+                if (!imeBounds.isEmpty && imeBounds.top > 0) {
+                    usableBottom = minOf(usableBottom, imeBounds.top.toFloat())
+                }
+            }
+        } catch (_: Exception) {}
+        return x >= 1f && x <= (w - 1f) && y >= 1f && y <= (usableBottom - 1f)
+    }
+
+    fun isNodeVisibleOnScreen(node: AccessibilityNodeInfo): Boolean {
+        if (!node.isVisibleToUser) return false
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        if (bounds.isEmpty) return false
+        return isPointOnScreen(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+    }
+
+    fun pressEnterOnFocusedNode(): Boolean {
+        val focused = findFocusedInputNode() ?: return false
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (focused.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun scrollFirstScrollable(forward: Boolean = true): Boolean {
+        val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+        fun findAndScroll(node: AccessibilityNodeInfo): Boolean {
+            if (node.isScrollable && node.performAction(action)) return true
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                if (findAndScroll(child)) return true
+            }
+            return false
+        }
+        rootInActiveWindow?.let { if (findAndScroll(it)) return true }
+        try {
+            for (window in windows) {
+                val wRoot = window.root ?: continue
+                if (findAndScroll(wRoot)) return true
+            }
+        } catch (_: Exception) {}
+        return false
     }
 
     fun clickCoordinates(x: Float, y: Float, onComplete: ((Boolean) -> Unit)? = null): Boolean {

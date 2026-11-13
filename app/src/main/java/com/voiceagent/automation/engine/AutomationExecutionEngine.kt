@@ -93,6 +93,7 @@ object AutomationExecutionEngine {
                         ActionType.SWIPE,
                         ActionType.PRESS_BACK,
                         ActionType.PRESS_HOME,
+                        ActionType.PRESS_ENTER,
                         ActionType.CHECK_ELEMENT_EXISTS,
                         ActionType.CHECK_TEXT_EXISTS
                     )
@@ -420,31 +421,60 @@ object AutomationExecutionEngine {
                 ensureTargetAppInForeground(context, service, step)
                 val node = waitForNode(service, step)
                 if (node != null) {
+                    // Dismiss soft keyboard if it is covering the target element or zoomed viewport
+                    if (service.isSoftKeyboardVisible() && !service.isNodeVisibleOnScreen(node)) {
+                        service.dismissSoftKeyboard()
+                        delay(350)
+                    }
+
                     // Ensure button/circle is scrolled into view (especially if soft keyboard was open)
                     try {
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                             node.performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-                            delay(100)
+                            delay(150)
                         }
                     } catch (_: Exception) {}
 
+                    // If still off-screen (e.g. browser zoomed in on password field), scroll viewport
+                    if (!service.isNodeVisibleOnScreen(node)) {
+                        if (!service.scrollFirstScrollable(forward = true)) {
+                            val (w, h) = service.getScreenSize()
+                            awaitSwipe(service, w * 0.5f, h * 0.65f, w * 0.5f, h * 0.35f, 250L)
+                        }
+                        delay(250)
+                    }
+
                     val center = service.getNodeCenter(node)
+                    val centerOnScreen = center != null && service.isPointOnScreen(center.first, center.second)
                     val pkg = node.packageName?.toString()?.lowercase() ?: ""
                     val isBrowserOrWeb = service.isInsideWebView(node) ||
                         pkg.contains("chrome") || pkg.contains("firefox") || pkg.contains("mozilla") ||
                         pkg.contains("edge") || pkg.contains("sbrowser") || pkg.contains("opera") ||
                         node.isCheckable
 
-                    val clicked = if (isBrowserOrWeb && center != null) {
-                        // Real touch gesture is far more reliable than ACTION_CLICK on WebView/browser buttons & radio circles
-                        awaitClickCoordinates(service, center.first, center.second) || service.clickNode(node)
+                    var clicked = if (isBrowserOrWeb && centerOnScreen) {
+                        // Real touch gesture is far more reliable than ACTION_CLICK on visible WebView/browser buttons
+                        awaitClickCoordinates(service, center!!.first, center.second) || service.clickNode(node)
                     } else {
-                        service.clickNode(node) || (center != null && awaitClickCoordinates(service, center.first, center.second))
+                        service.clickNode(node) || (centerOnScreen && awaitClickCoordinates(service, center!!.first, center.second))
+                    }
+
+                    // If this is a login/submit button and clicking failed, try submitting via IME Enter
+                    if (!clicked && isLoginOrSubmitStep(step)) {
+                        clicked = service.pressEnterOnFocusedNode()
                     }
                     return StepResult(clicked, if (clicked) null else "Found element but failed to click node", elementFound = true, actionAttempted = true, actionConfirmed = clicked)
                 }
+                // For login/submit steps where the button is off-screen/zoomed out, try IME Enter first
+                if (isLoginOrSubmitStep(step) && service.pressEnterOnFocusedNode()) {
+                    return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+                }
                 // Fallback to screen coordinates if provided (e.g. unlabeled circle/icon)
                 if (step.clickX != null && step.clickY != null) {
+                    if (service.isSoftKeyboardVisible()) {
+                        service.dismissSoftKeyboard()
+                        delay(350)
+                    }
                     val clicked = awaitClickCoordinates(service, step.clickX, step.clickY)
                     return StepResult(clicked, if (clicked) null else "Coordinate tap gesture was cancelled", elementFound = false, actionAttempted = true, actionConfirmed = clicked)
                 }
@@ -541,6 +571,31 @@ object AutomationExecutionEngine {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
                 val success = service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
                 return StepResult(success, actionAttempted = true, actionConfirmed = success)
+            }
+
+            ActionType.PRESS_ENTER -> {
+                if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
+                if (service.pressEnterOnFocusedNode()) {
+                    return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+                }
+                // Fallback: dismiss keyboard and click a visible Login/Submit button
+                if (service.isSoftKeyboardVisible()) {
+                    service.dismissSoftKeyboard()
+                    delay(350)
+                }
+                val submitNode = service.findNode(
+                    candidateTexts = listOf("Login", "Log in", "Sign in", "Submit", "Go", "تسجيل الدخول", "دخول")
+                )
+                if (submitNode != null) {
+                    val center = service.getNodeCenter(submitNode)
+                    val clicked = if (center != null && service.isPointOnScreen(center.first, center.second)) {
+                        awaitClickCoordinates(service, center.first, center.second) || service.clickNode(submitNode)
+                    } else {
+                        service.clickNode(submitNode)
+                    }
+                    return StepResult(clicked, if (clicked) null else "Found submit button but failed to click", elementFound = true, actionAttempted = true, actionConfirmed = clicked)
+                }
+                return StepResult(false, "Could not press Enter or find a Login/Submit button", elementFound = false, actionAttempted = true, actionConfirmed = false)
             }
 
             ActionType.CHECK_ELEMENT_EXISTS -> {
@@ -721,12 +776,25 @@ object AutomationExecutionEngine {
         return StepResult(false, "$notFoundMsg$snapInfo", elementFound = false, actionAttempted = true, actionConfirmed = false)
     }
 
+    private fun isLoginOrSubmitStep(step: AutomationStep): Boolean {
+        val keywords = listOf("login", "log in", "sign in", "submit", "دخول", "تسجيل الدخول")
+        val combined = buildString {
+            append(step.title).append(' ')
+            append(step.selectorText ?: "").append(' ')
+            append(step.selectorResourceId ?: "").append(' ')
+            append(step.candidateTexts.joinToString(" "))
+        }.lowercase()
+        return keywords.any { combined.contains(it) }
+    }
+
     private suspend fun waitForNode(
         service: VoiceAccessibilityService,
         step: AutomationStep
     ): AccessibilityNodeInfo? {
         val timeoutMs = (step.timeoutSeconds.coerceAtLeast(2)) * 1000L
         val startTime = System.currentTimeMillis()
+        var keyboardDismissed = false
+        var scrollAttempts = 0
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             if (isStopRequested) return null
@@ -738,6 +806,28 @@ object AutomationExecutionEngine {
                 candidateTexts = step.candidateTexts
             )
             if (node != null) return node
+
+            val elapsed = System.currentTimeMillis() - startTime
+            // After 1.2s without finding the element, dismiss soft keyboard if open (it often hides/zooms the Login button)
+            if (!keyboardDismissed && elapsed >= 1200L && service.isSoftKeyboardVisible()) {
+                keyboardDismissed = true
+                if (service.dismissSoftKeyboard()) {
+                    delay(350)
+                    continue
+                }
+            }
+
+            // If still not found after 2s, scroll down up to 2 times to bring off-screen elements into view
+            if (scrollAttempts < 2 && elapsed >= 2000L + (scrollAttempts * 900L)) {
+                scrollAttempts++
+                if (!service.scrollFirstScrollable(forward = true)) {
+                    val (w, h) = service.getScreenSize()
+                    awaitSwipe(service, w * 0.5f, h * 0.65f, w * 0.5f, h * 0.35f, 250L)
+                }
+                delay(300)
+                continue
+            }
+
             delay(250)
         }
         return null

@@ -15,6 +15,7 @@ enum class ActionType(val labelEn: String, val labelAr: String) {
     SWIPE("Swipe Gesture", "سحب على الشاشة"),
     PRESS_BACK("Press Back Button", "الرجوع للخلف"),
     PRESS_HOME("Press Home", "الرجوع للرئيسية"),
+    PRESS_ENTER("Press Enter / Submit", "الضغط على زر الإدخال (Enter)"),
     CHECK_ELEMENT_EXISTS("Condition: Element Exists", "شرط: فحص وجود عنصر"),
     CHECK_TEXT_EXISTS("Condition: Text Exists", "شرط: فحص وجود نص"),
     SEND_DEEP_LINK("Send Deep Link / Intent", "إرسال رابط تطبيق مباشر"),

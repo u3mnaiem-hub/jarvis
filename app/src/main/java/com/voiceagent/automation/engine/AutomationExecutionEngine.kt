@@ -422,8 +422,10 @@ object AutomationExecutionEngine {
                 if (node != null) {
                     // Ensure button/circle is scrolled into view (especially if soft keyboard was open)
                     try {
-                        node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SHOW_ON_SCREEN)
-                        delay(100)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                            node.performAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                            delay(100)
+                        }
                     } catch (_: Exception) {}
 
                     val center = service.getNodeCenter(node)

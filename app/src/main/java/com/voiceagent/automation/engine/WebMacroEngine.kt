@@ -278,7 +278,7 @@ class WebMacroEngine(private val context: Context) {
                 function collect(doc, frameLabel) {
                     if (!doc) return;
                     var nodes = doc.querySelectorAll('input, button, a, select, div[onclick], span[onclick], [role="button"]');
-                    for (var i = 0; i < nodes.length && out.length < 40; i++) {
+                    for (var i = 0; i < nodes.length && out.length < 75; i++) {
                         var n = nodes[i];
                         var txt = (n.innerText || n.value || n.placeholder || '').trim().slice(0, 30);
                         out.push(n.tagName.toLowerCase() +

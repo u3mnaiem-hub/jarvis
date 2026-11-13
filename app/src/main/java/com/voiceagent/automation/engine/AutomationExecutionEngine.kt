@@ -368,6 +368,13 @@ object AutomationExecutionEngine {
         val textCandidates = buildList {
             step.selectorText?.takeIf { it.isNotBlank() }?.let { add(it) }
             addAll(step.candidateTexts.filter { it.isNotBlank() })
+            // Fallback: if no text selector was set, infer from ZTE #mm... IDs or "Click: <Name>" title
+            if (isEmpty()) {
+                step.selectorResourceId?.removePrefix("#")?.removePrefix("mm")?.takeIf { it.isNotBlank() }?.let { add(it) }
+                if (step.title.contains(":")) {
+                    step.title.substringAfter(":").trim().takeIf { it.isNotBlank() }?.let { add(it) }
+                }
+            }
         }
         val timeoutMs = (step.timeoutSeconds.coerceAtLeast(3)) * 1000L
 

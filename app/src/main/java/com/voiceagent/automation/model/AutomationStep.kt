@@ -23,6 +23,11 @@ data class AutomationStep(
     val selectorText: String? = null,
     val selectorContentDescription: String? = null,
     val selectorClassName: String? = null,
+
+    // Web / JS DOM selectors (for WebMacro)
+    val isWebStep: Boolean = false,
+    val cssSelector: String? = null,
+    val candidateCssSelectors: List<String> = emptyList(),
     
     // Semantic / Multi-text candidate matching (e.g. ["Login", "Log in", "تسجيل الدخول", "دخول"])
     val candidateTexts: List<String> = emptyList(),

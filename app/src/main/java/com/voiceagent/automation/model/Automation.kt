@@ -4,6 +4,11 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.util.UUID
 
+enum class MacroType {
+    SCREEN_MACRO,
+    WEB_MACRO
+}
+
 @Entity(tableName = "automations")
 data class Automation(
     @PrimaryKey
@@ -36,4 +41,11 @@ data class Automation(
 ) {
     val successRate: Int
         get() = if (executionCount > 0) ((successCount.toDouble() / executionCount) * 100).toInt() else 100
+
+    val macroType: MacroType
+        get() = if (steps.any { it.isWebStep || it.actionType == ActionType.OPEN_URL }) {
+            MacroType.WEB_MACRO
+        } else {
+            MacroType.SCREEN_MACRO
+        }
 }

@@ -78,9 +78,12 @@ object AutomationExecutionEngine {
                 totalSteps.coerceAtLeast(1)
             )
 
+            val isWebMacro = automation.macroType == MacroType.WEB_MACRO
+            var webEngine: WebMacroEngine? = if (isWebMacro) WebMacroEngine(context) else null
+
             try {
-                // For actions that need accessibility, check service
-                val needsAccessibility = automation.steps.any {
+                // Only ScreenMacro steps require AccessibilityService (WebMacro runs inside app WebView)
+                val needsAccessibility = !isWebMacro && automation.steps.any {
                     it.actionType in listOf(
                         ActionType.CLICK_ELEMENT,
                         ActionType.CLICK_COORDINATE,
@@ -207,13 +210,18 @@ object AutomationExecutionEngine {
                     var actionConfirmed = false
                     var elementFound = false
                     var actualRetries = 0
-                    val attempts = (step.maxRetries + 1).coerceAtLeast(1)
+                    val effectiveRetries = if (isLoginOrSubmitStep(step) || step.actionType == ActionType.INJECT_CREDENTIAL) {
+                        step.maxRetries.coerceAtMost(2) // Never lock router admin page with >2 login retries
+                    } else {
+                        step.maxRetries.coerceIn(1, 5)
+                    }
+                    val attempts = (effectiveRetries + 1).coerceAtLeast(1)
 
                     for (attempt in 1..attempts) {
                         if (isStopRequested) break
                         actualRetries = attempt - 1
                         try {
-                            val result = executeSingleStep(context, service, db, step)
+                            val result = executeSingleStep(context, service, db, step, webEngine)
                             stepSuccess = result.success
                             stepError = result.errorMessage
                             actionAttempted = result.actionAttempted
@@ -227,7 +235,7 @@ object AutomationExecutionEngine {
                             Log.e(TAG, "Error executing step '${step.title}' attempt $attempt: $stepError")
                         }
                         if (attempt < attempts && !isStopRequested) {
-                            delay(600)
+                            delay(1200)
                         }
                     }
 
@@ -327,6 +335,9 @@ object AutomationExecutionEngine {
                     )
                 }
             } finally {
+                withContext(NonCancellable) {
+                    webEngine?.destroy()
+                }
                 // Always stop Foreground Service
                 AutomationForegroundService.stop(context)
             }
@@ -341,12 +352,116 @@ object AutomationExecutionEngine {
         val elementFound: Boolean = true
     )
 
+    private suspend fun executeWebStep(
+        webEngine: WebMacroEngine,
+        db: VoiceAgentDatabase,
+        step: AutomationStep,
+        context: Context
+    ): StepResult {
+        val cssSelectors = buildList {
+            step.cssSelector?.takeIf { it.isNotBlank() }?.let { add(it) }
+            addAll(step.candidateCssSelectors.filter { it.isNotBlank() })
+            step.selectorResourceId?.takeIf { it.isNotBlank() }?.let { id ->
+                add(if (id.startsWith("#") || id.startsWith(".")) id else "#$id")
+            }
+        }
+        val textCandidates = buildList {
+            step.selectorText?.takeIf { it.isNotBlank() }?.let { add(it) }
+            addAll(step.candidateTexts.filter { it.isNotBlank() })
+        }
+        val timeoutMs = (step.timeoutSeconds.coerceAtLeast(3)) * 1000L
+
+        return when (step.actionType) {
+            ActionType.OPEN_URL -> {
+                val urlStr = step.url ?: return StepResult(false, "URL is not specified", actionAttempted = false, elementFound = false)
+                val finalUrl = if (urlStr.startsWith("http://") || urlStr.startsWith("https://")) urlStr else "http://$urlStr"
+                val loaded = webEngine.loadUrl(finalUrl, timeoutMs.coerceAtLeast(15000L))
+                if (!loaded) {
+                    return StepResult(false, "Timed out loading $finalUrl in WebView", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                }
+                val conflict = webEngine.checkSessionConflict()
+                if (conflict != null) {
+                    val msg = "Router session conflict: another admin session is already logged in ($conflict). Please log out from the other browser first."
+                    if (SafeModeManager.isTtsEnabled(context)) TextToSpeechManager.speak(msg)
+                    return StepResult(false, msg, elementFound = false, actionAttempted = true, actionConfirmed = false)
+                }
+                StepResult(true, actionAttempted = true, actionConfirmed = true)
+            }
+
+            ActionType.WAIT_FOR_ELEMENT -> {
+                val found = webEngine.waitForElement(cssSelectors, textCandidates, timeoutMs)
+                if (found) {
+                    StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+                } else {
+                    val dump = if (webEngine.debugMode) "\n[WebDebug] Elements: ${webEngine.dumpInteractiveElements()}" else ""
+                    StepResult(false, "Web element '${textCandidates.firstOrNull() ?: cssSelectors.firstOrNull()}' not found within ${timeoutMs / 1000}s.$dump", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                }
+            }
+
+            ActionType.SET_TEXT -> {
+                val value = step.textPayload ?: ""
+                val ok = webEngine.fillField(cssSelectors, textCandidates, value, timeoutMs, isSensitive = false)
+                StepResult(ok, if (ok) null else "Failed to fill web field '${cssSelectors.firstOrNull() ?: textCandidates.firstOrNull()}'", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
+            }
+
+            ActionType.INJECT_CREDENTIAL -> {
+                val key = step.credentialKey ?: return StepResult(false, "Credential key is not specified", actionAttempted = false, elementFound = false)
+                val cred = db.credentialDao().getCredentialByKey(key) ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
+                val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
+                val ok = webEngine.fillField(cssSelectors, textCandidates, decryptedPassword, timeoutMs, isSensitive = true)
+                if (ok) {
+                    db.credentialDao().updateLastUsed(key, System.currentTimeMillis())
+                }
+                StepResult(ok, if (ok) null else "Failed to fill password field in WebView", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
+            }
+
+            ActionType.CLICK_ELEMENT -> {
+                val isLogin = isLoginOrSubmitStep(step)
+                val ok = webEngine.clickElement(cssSelectors, textCandidates, timeoutMs, tryLoginFallback = isLogin)
+                if (ok && isLogin) {
+                    delay(800)
+                    val conflict = webEngine.checkSessionConflict()
+                    if (conflict != null) {
+                        val msg = "Router session conflict detected ($conflict). Only one admin session is allowed at a time."
+                        if (SafeModeManager.isTtsEnabled(context)) TextToSpeechManager.speak(msg)
+                        return StepResult(false, msg, elementFound = true, actionAttempted = true, actionConfirmed = false)
+                    }
+                }
+                if (!ok) {
+                    val dump = if (webEngine.debugMode) "\n[WebDebug] Elements: ${webEngine.dumpInteractiveElements()}" else ""
+                    return StepResult(false, "Could not click web element '${textCandidates.firstOrNull() ?: cssSelectors.firstOrNull()}'.$dump", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                }
+                StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+            }
+
+            ActionType.PRESS_ENTER -> {
+                val ok = webEngine.submitLoginFormFallback()
+                StepResult(ok, if (ok) null else "Failed to submit web form via Enter", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
+            }
+
+            else -> StepResult(false, "Unsupported web step: ${step.actionType}", actionAttempted = false, elementFound = false)
+        }
+    }
+
     private suspend fun executeSingleStep(
         context: Context,
         service: VoiceAccessibilityService?,
         db: VoiceAgentDatabase,
-        step: AutomationStep
+        step: AutomationStep,
+        webEngine: WebMacroEngine? = null
     ): StepResult {
+        if (webEngine != null && step.actionType in listOf(
+                ActionType.OPEN_URL,
+                ActionType.WAIT_FOR_ELEMENT,
+                ActionType.CLICK_ELEMENT,
+                ActionType.SET_TEXT,
+                ActionType.INJECT_CREDENTIAL,
+                ActionType.PRESS_ENTER
+            )
+        ) {
+            return executeWebStep(webEngine, db, step, context)
+        }
+
         when (step.actionType) {
             ActionType.LAUNCH_APP -> {
                 val pkg = step.targetPackage ?: return StepResult(false, "Target package is not specified", actionAttempted = false, elementFound = false)

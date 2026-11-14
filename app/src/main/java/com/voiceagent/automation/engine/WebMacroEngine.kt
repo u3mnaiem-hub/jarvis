@@ -684,14 +684,163 @@ class WebMacroEngine(private val context: Context) {
         }
     }
 
+    /**
+     * Snapshot of the ZTE login form state. IMPORTANT: the ZTE login page renders the SAME top menu
+     * (Home/Topology/Internet/...), Logout, sess_token etc. as the logged-in pages, so those elements
+     * prove nothing about authentication. The only reliable signals are: login form still present,
+     * server-side error text, and the lock-out counter / disabled login button.
+     */
+    data class LoginState(
+        val formPresent: Boolean = true,
+        val loginDisabled: Boolean = false,
+        val errorText: String = "",
+        val lockText: String = "",
+        val href: String = "",
+        val ready: Boolean = false,
+        val valid: Boolean = false
+    )
+
+    suspend fun getLoginState(): LoginState {
+        val js = """
+            (function() {
+                function shown(el) {
+                    // Layout-independent (the WebView may be detached): walk ancestors' computed display only.
+                    try {
+                        var n = el;
+                        while (n && n.nodeType === 1) {
+                            var st = window.getComputedStyle(n);
+                            if (st.display === 'none' || st.visibility === 'hidden') return false;
+                            n = n.parentElement;
+                        }
+                        return !!el;
+                    } catch (e) { return !!el; }
+                }
+                function txt(id) {
+                    var e = document.getElementById(id);
+                    if (!e || !shown(e)) return '';
+                    return (e.innerText || e.textContent || '').trim();
+                }
+                var u = document.getElementById('Frm_Username');
+                var b = document.getElementById('LoginId');
+                return JSON.stringify({
+                    formPresent: !!u,
+                    loginDisabled: !!(b && (b.disabled || b.getAttribute('disabled'))) || !!(u && (u.disabled || u.getAttribute('disabled'))),
+                    error: txt('login_error_span') || txt('login_error'),
+                    lock: txt('login_error_waittime'),
+                    href: String(location.href || ''),
+                    ready: document.readyState === 'complete'
+                });
+            })();
+        """.trimIndent()
+        val raw = evalJs(js) ?: return LoginState()
+        return try {
+            val unquoted = if (raw.startsWith("\"")) org.json.JSONTokener(raw).nextValue().toString() else raw
+            val o = JSONObject(unquoted)
+            LoginState(
+                formPresent = o.optBoolean("formPresent", true),
+                loginDisabled = o.optBoolean("loginDisabled", false),
+                errorText = o.optString("error", ""),
+                lockText = o.optString("lock", ""),
+                href = o.optString("href", ""),
+                ready = o.optBoolean("ready", false),
+                valid = true
+            )
+        } catch (_: Exception) {
+            LoginState()
+        }
+    }
+
+    /**
+     * Called right after the Login button was clicked. Returns null on verified success,
+     * or a human-readable failure reason. Login is async (token GET -> form submit -> full page reload).
+     */
+    suspend fun waitForLoginResult(timeoutMs: Long = 20000L): String? {
+        val start = System.currentTimeMillis()
+        delay(1200) // let the token request + form submit start navigating
+        var last = LoginState()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            val st = getLoginState()
+            if (st.valid) {
+                last = st
+                if (st.ready && st.formPresent) {
+                    if (st.lockText.isNotBlank()) {
+                        return "Router login is locked: ${st.lockText}. Wait for the countdown to finish before retrying."
+                    }
+                    if (st.errorText.isNotBlank()) {
+                        return "Router rejected the login: \"${st.errorText}\". Check the router password saved in Credentials."
+                    }
+                }
+                if (st.ready && !st.formPresent) {
+                    delay(800) // let the logged-in page build its menus
+                    return null
+                }
+            }
+            delay(400)
+        }
+        return "Login did not complete within ${timeoutMs / 1000}s: the router is still showing the login page" +
+            (if (last.errorText.isNotBlank()) " (\"${last.errorText}\")" else "") +
+            ". Most likely the password is wrong or the router is temporarily locked."
+    }
+
+    /** Releases the single ZTE admin session. Safe to call at any time; never throws. */
+    suspend fun logoutQuietly() {
+        try {
+            if (webView == null) return
+            val js = """
+                (function() {
+                    if (document.getElementById('Frm_Username')) return 'login-page';
+                    try { if (typeof LogOff === 'function') { LogOff(); return 'logoff'; } } catch (e) {}
+                    var l = document.getElementById('logOff') || document.getElementById('LogOffLnk');
+                    if (l) { try { l.click(); return 'click'; } catch (e) {} }
+                    return 'none';
+                })();
+            """.trimIndent()
+            val res = evalJs(js)
+            Log.d(TAG, "logoutQuietly -> $res")
+            if (res != null && !res.contains("login-page") && !res.contains("none")) delay(1500)
+        } catch (e: Exception) {
+            Log.w(TAG, "logoutQuietly failed: ${e.message}")
+        }
+    }
+
+    /** Recursively lists key names of the router's JS `meta_menu` (menu/sub-menu IDs) for diagnostics. */
+    suspend fun dumpMenuMeta(): String {
+        val js = """
+            (function() {
+                try {
+                    if (typeof meta_menu === 'undefined') return 'meta_menu undefined';
+                    var out = [];
+                    function walk(o, p, d) {
+                        if (!o || typeof o !== 'object' || d > 4 || out.length > 120) return;
+                        for (var k in o) {
+                            if (k === 'length') continue;
+                            out.push(p + k);
+                            walk(o[k], p + k + '/', d + 1);
+                        }
+                    }
+                    walk(meta_menu, '', 0);
+                    return out.join(', ');
+                } catch (e) { return 'meta_menu error: ' + e; }
+            })();
+        """.trimIndent()
+        return evalJs(js)?.trim('"') ?: ""
+    }
+
     suspend fun saveDomSnapshot(stepTitle: String): String? {
         return try {
             val dump = dumpInteractiveElements()
+            val ls = getLoginState()
+            val meta = dumpMenuMeta()
             val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "debug_snapshots")
             if (!dir.exists()) dir.mkdirs()
             val safeName = stepTitle.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
             val file = File(dir, "snapshot_${System.currentTimeMillis()}_$safeName.txt")
-            file.writeText("Step: $stepTitle\nTimestamp: ${System.currentTimeMillis()}\nInteractive Elements:\n$dump\n")
+            file.writeText(
+                "Step: $stepTitle\nTimestamp: ${System.currentTimeMillis()}\n" +
+                    "URL: ${ls.href}\nLoginFormPresent: ${ls.formPresent} (true = NOT logged in)\n" +
+                    "LoginDisabled: ${ls.loginDisabled}\nLoginError: ${ls.errorText}\nLockText: ${ls.lockText}\n" +
+                    "meta_menu keys: $meta\nInteractive Elements:\n$dump\n"
+            )
             file.absolutePath
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save DOM snapshot: ${e.message}")

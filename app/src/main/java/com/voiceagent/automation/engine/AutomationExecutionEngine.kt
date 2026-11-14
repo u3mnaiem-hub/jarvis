@@ -211,8 +211,10 @@ object AutomationExecutionEngine {
                     var actionConfirmed = false
                     var elementFound = false
                     var actualRetries = 0
-                    val effectiveRetries = if (isLoginOrSubmitStep(step) || step.actionType == ActionType.INJECT_CREDENTIAL) {
-                        step.maxRetries.coerceAtMost(2) // Never lock router admin page with >2 login retries
+                    val effectiveRetries = if (isLoginOrSubmitStep(step) && step.isWebStep) {
+                        0 // NEVER retry a router login click: wrong attempts trigger the router's lock-out timer
+                    } else if (isLoginOrSubmitStep(step) || step.actionType == ActionType.INJECT_CREDENTIAL) {
+                        step.maxRetries.coerceAtMost(2)
                     } else {
                         step.maxRetries.coerceIn(1, 5)
                     }
@@ -342,6 +344,9 @@ object AutomationExecutionEngine {
                 }
             } finally {
                 withContext(NonCancellable) {
+                    // Always release the router's single admin session, even after a failed run,
+                    // otherwise the next attempt is blocked by "another user is logged in".
+                    webEngine?.logoutQuietly()
                     webEngine?.destroy()
                 }
                 // Always stop Foreground Service
@@ -520,19 +525,42 @@ object AutomationExecutionEngine {
                             t.lowercase() in listOf("on", "off", "allow", "block", "enable", "disable", "تفعيل", "تعطيل", "سماح", "حظر")
                         }
                     }
+                if (isLogin) {
+                    // Never click a locked login button: it does nothing and each failed attempt can extend the lock.
+                    val pre = webEngine.getLoginState()
+                    if (pre.valid && pre.formPresent && (pre.loginDisabled || pre.lockText.isNotBlank())) {
+                        val msg = "Router login is locked/disabled" +
+                            (if (pre.lockText.isNotBlank()) " (${pre.lockText})" else "") +
+                            ". Wait a few minutes, then run again."
+                        if (SafeModeManager.isTtsEnabled(context)) TextToSpeechManager.speak("Router login is locked. Please wait and try again.")
+                        return StepResult(false, msg, elementFound = true, actionAttempted = false, actionConfirmed = false)
+                    }
+                }
                 val ok = if (rowTarget != null && textCandidates.isNotEmpty()) {
                     webEngine.clickInRow(rowTarget, textCandidates, timeoutMs)
                 } else {
                     webEngine.clickElement(cssSelectors, textCandidates, timeoutMs, tryLoginFallback = isLogin)
                 }
                 if (ok && isLogin) {
-                    delay(800)
+                    // Clicking "Login" proves nothing: the ZTE login page already contains the full menu.
+                    // Verify that the login form is really gone (authenticated) or report the router's own error.
+                    val authFailure = webEngine.waitForLoginResult(20000L)
+                    if (authFailure != null) {
+                        val snapPath = webEngine.saveDomSnapshot(step.title)
+                        if (SafeModeManager.isTtsEnabled(context)) TextToSpeechManager.speak("Router login failed")
+                        return StepResult(
+                            false,
+                            "$authFailure${if (snapPath != null) " [Snapshot: $snapPath]" else ""}",
+                            elementFound = true, actionAttempted = true, actionConfirmed = false
+                        )
+                    }
                     val conflict = webEngine.checkSessionConflict()
                     if (conflict != null) {
                         val msg = "Router session conflict detected ($conflict). Only one admin session is allowed at a time."
                         if (SafeModeManager.isTtsEnabled(context)) TextToSpeechManager.speak(msg)
                         return StepResult(false, msg, elementFound = true, actionAttempted = true, actionConfirmed = false)
                     }
+                    return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
                 }
                 if (ok && !step.waitAfterNavigationSelector.isNullOrBlank()) {
                     val nextReady = webEngine.waitForElement(

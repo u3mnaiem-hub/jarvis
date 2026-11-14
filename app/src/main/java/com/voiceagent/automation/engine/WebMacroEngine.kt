@@ -879,6 +879,108 @@ class WebMacroEngine(private val context: Context) {
         return evalJs(js)?.trim('"') ?: ""
     }
 
+    /**
+     * Out-of-the-Box Native JS Function Bridge for ZTE H188:
+     * Instead of simulating DOM mouse clicks across menus, attaches the WebView visibly (`activeWebViewFlow`),
+     * logs in via the router's own `$("#LoginId").click()`, jumps directly to Parental Control via the router's
+     * global `AjaxPageGet(...)` function, invokes `dataPost("InstSwitch", ...)` or toggles the radio directly,
+     * and calls `LogOff()`.
+     */
+    suspend fun executeZteNativeJsBridge(
+        baseUrl: String = "https://192.168.1.1/",
+        username: String = "admin",
+        plainPassword: String,
+        deviceName: String,
+        enableRule: Boolean
+    ): IndexedRadioResult {
+        val targetValue = if (enableRule) "1" else "0"
+        val loaded = loadUrl(baseUrl, 15000L)
+        if (!loaded) {
+            return IndexedRadioResult(
+                success = false,
+                status = "TIMEOUT",
+                message = "Native JS Bridge: Timed out loading $baseUrl"
+            )
+        }
+
+        // Wait up to 800ms for MainActivity to attach the visible WebView overlay
+        delay(600)
+
+        val preState = getLoginState()
+        if (preState.formPresent) {
+            if (preState.loginDisabled || preState.lockText.isNotBlank()) {
+                return IndexedRadioResult(
+                    success = false,
+                    status = "LOCKED",
+                    message = "Router login is currently locked: ${preState.lockText}"
+                )
+            }
+            val userQuote = JSONObject.quote(username)
+            val passQuote = JSONObject.quote(plainPassword)
+            val loginJs = """
+                (function() {
+                    var u = document.getElementById('Frm_Username');
+                    var p = document.getElementById('Frm_Password');
+                    var b = document.getElementById('LoginId');
+                    if (!u || !p || !b) return 'missing';
+                    u.value = $userQuote;
+                    p.value = $passQuote;
+                    b.click();
+                    return 'clicked';
+                })();
+            """.trimIndent()
+            evalJs(loginJs)
+
+            val loginErr = waitForLoginResult(18000L)
+            if (loginErr != null) {
+                return IndexedRadioResult(
+                    success = false,
+                    status = "LOGIN_FAILED",
+                    message = loginErr
+                )
+            }
+        }
+
+        // Jump directly to Parental Control using the router's own JS menu table or click #mmInternet -> #smParentCtrl
+        val jumpJs = """
+            (function() {
+                try {
+                    if (typeof menu_items !== 'undefined' && menu_items['mmInternet'] && menu_items['mmInternet']['smParentCtrl']) {
+                        var page = menu_items['mmInternet']['smParentCtrl']['page'];
+                        if (page && typeof AjaxPageGet === 'function') {
+                            AjaxPageGet('getpage.lua?pid=123&nextpage=' + page + '&Menu3Location=0', '2');
+                            return 'direct:' + page;
+                        }
+                    }
+                    var mm = document.getElementById('mmInternet');
+                    if (mm) { mm.click(); return 'clicked_mmInternet'; }
+                } catch (e) { return 'err:' + e; }
+                return 'none';
+            })();
+        """.trimIndent()
+        val jumpRes = evalJs(jumpJs) ?: ""
+        if (jumpRes.contains("clicked_mmInternet")) {
+            delay(800)
+            clickElement(listOf("[id='smParentCtrl']"), listOf("Parental Control", "التحكم الأبوي"), 8000L)
+        } else {
+            delay(1200)
+        }
+
+        // Now run the indexed device scanner & toggle (which triggers the router's own jQuery `.change()` -> `dataPost('InstSwitch', ...)`)
+        val res = setIndexedDeviceRadio(
+            namePattern = "[id='instName_ParentCtrl:{index}']",
+            radioPattern = "input[type='radio'][id='Enable:ParentCtrl:{index}']",
+            indexStart = 0,
+            indexEnd = 10,
+            deviceName = deviceName,
+            targetValue = targetValue,
+            timeoutMs = 12000L
+        )
+
+        logoutQuietly()
+        return res
+    }
+
     private suspend fun elementExists(
         cssSelectors: List<String>,
         textCandidates: List<String>

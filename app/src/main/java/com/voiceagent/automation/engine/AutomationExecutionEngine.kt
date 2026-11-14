@@ -1288,6 +1288,11 @@ object AutomationExecutionEngine {
         var completedCount = 0
         val totalLogicalSteps = 3
 
+        val cred = db.credentialDao().getCredentialByKey(credKey)
+            ?: db.credentialDao().getCredentialByKey("router_password")
+            ?: db.credentialDao().getCredentialByKey("router_admin_pass")
+        val plainPassword = cred?.let { KeystoreManager.decrypt(it.encryptedData, it.iv) }
+
         try {
             // Step 1 & 2: Direct HTTP Login (GET token -> POST SHA-256 credentials)
             val step1Start = System.currentTimeMillis()
@@ -1308,6 +1313,48 @@ object AutomationExecutionEngine {
 
             when (loginResult) {
                 is ZteRouterHttpClient.RouterLoginResult.Failure -> {
+                    // If Direct HTTP was not explicitly rejected for bad password/lockout and we have plainPassword,
+                    // automatically run the Out-of-the-Box Native JS Function Bridge in a visible WebView!
+                    if (plainPassword != null && loginResult.category != ZteRouterHttpClient.FailureType.LOGIN_REJECTED) {
+                        val bridgeEngine = WebMacroEngine(context)
+                        try {
+                            val bridgeRes = bridgeEngine.executeZteNativeJsBridge(
+                                baseUrl = baseUrl,
+                                username = "admin",
+                                plainPassword = plainPassword,
+                                deviceName = deviceName,
+                                enableRule = enableRule
+                            )
+                            if (bridgeRes.success) {
+                                completedCount = totalLogicalSteps
+                                isOverallSuccess = true
+                                stepDetails.add(
+                                    StepExecutionDetail(
+                                        stepOrder = 1,
+                                        stepTitle = "Native JS Function Bridge ($deviceName)",
+                                        actionType = ActionType.SET_INDEXED_RADIO,
+                                        status = StepStatus.SUCCESS,
+                                        startedAt = step1Start,
+                                        finishedAt = System.currentTimeMillis(),
+                                        expectedElement = deviceName,
+                                        elementFound = true,
+                                        actionAttempted = true,
+                                        actionConfirmed = true,
+                                        message = bridgeRes.message
+                                    )
+                                )
+                                recordLogAndFinish(
+                                    db, context, automation, startTime, true,
+                                    completedCount, totalLogicalSteps, null, null,
+                                    null, null, stepDetails, onComplete
+                                )
+                                return
+                            }
+                        } finally {
+                            bridgeEngine.destroy()
+                        }
+                    }
+
                     failedStepTitle = "Direct HTTP Router Login"
                     failureReason = loginResult.message + "\n" + httpClient.stepLogs.joinToString("\n")
                     failureCategory = loginResult.category.name
@@ -1369,7 +1416,7 @@ object AutomationExecutionEngine {
                 }
             }
 
-            // Step 3: Parental Control Toggle via Direct HTTP
+            // Step 3: Parental Control Toggle via Direct HTTP (with automatic Native JS Function Bridge fallback)
             val step2Start = System.currentTimeMillis()
             AutomationForegroundService.start(
                 context,
@@ -1383,29 +1430,77 @@ object AutomationExecutionEngine {
                 enableRule = enableRule
             )
             if (!toggleRes.success) {
-                failedStepTitle = "Parental Control Toggle ($deviceName)"
-                failureReason = toggleRes.message + "\n" + httpClient.stepLogs.joinToString("\n")
-                failureCategory = (toggleRes.failureType ?: ZteRouterHttpClient.FailureType.DEVICE_CONTROL_ERROR).name
-                suggestedAction = "Login succeeded! Check the debug request log in Execution History or capture the Parental Control toggle POST in Chrome's Network tab."
-                stepDetails.add(
-                    StepExecutionDetail(
-                        stepOrder = 2,
-                        stepTitle = failedStepTitle,
-                        actionType = ActionType.SET_INDEXED_RADIO,
-                        status = StepStatus.FAILED,
-                        startedAt = step2Start,
-                        finishedAt = System.currentTimeMillis(),
-                        expectedElement = deviceName,
-                        elementFound = false,
-                        actionAttempted = true,
-                        actionConfirmed = false,
-                        failureReason = failureReason,
-                        suggestedAction = suggestedAction,
-                        message = failureReason
+                // Release the HTTP session first so the Native JS Bridge can log in without a session conflict
+                try { httpClient.logout() } catch (_: Exception) {}
+
+                var bridgeRecovered = false
+                var bridgeMsg = ""
+                if (plainPassword != null) {
+                    val bridgeEngine = WebMacroEngine(context)
+                    try {
+                        val bridgeRes = bridgeEngine.executeZteNativeJsBridge(
+                            baseUrl = baseUrl,
+                            username = "admin",
+                            plainPassword = plainPassword,
+                            deviceName = deviceName,
+                            enableRule = enableRule
+                        )
+                        if (bridgeRes.success) {
+                            bridgeRecovered = true
+                            bridgeMsg = bridgeRes.message
+                        } else {
+                            bridgeMsg = bridgeRes.message
+                        }
+                    } finally {
+                        bridgeEngine.destroy()
+                    }
+                }
+
+                if (bridgeRecovered) {
+                    completedCount++
+                    isOverallSuccess = true
+                    stepDetails.add(
+                        StepExecutionDetail(
+                            stepOrder = 2,
+                            stepTitle = "Parental Control Toggle via Native JS Bridge ($deviceName)",
+                            actionType = ActionType.SET_INDEXED_RADIO,
+                            status = StepStatus.SUCCESS,
+                            startedAt = step2Start,
+                            finishedAt = System.currentTimeMillis(),
+                            expectedElement = deviceName,
+                            elementFound = true,
+                            actionAttempted = true,
+                            actionConfirmed = true,
+                            message = "$bridgeMsg\n" + httpClient.stepLogs.joinToString("\n")
+                        )
                     )
-                )
-                if (SafeModeManager.isTtsEnabled(context)) {
-                    TextToSpeechManager.speak(toggleRes.message)
+                } else {
+                    failedStepTitle = "Parental Control Toggle ($deviceName)"
+                    failureReason = toggleRes.message +
+                        (if (bridgeMsg.isNotBlank()) "\n[JS Bridge]: $bridgeMsg" else "") +
+                        "\n" + httpClient.stepLogs.joinToString("\n")
+                    failureCategory = (toggleRes.failureType ?: ZteRouterHttpClient.FailureType.DEVICE_CONTROL_ERROR).name
+                    suggestedAction = "Login succeeded! Check the debug request log in Execution History or use the Router Control Panel on the Home screen."
+                    stepDetails.add(
+                        StepExecutionDetail(
+                            stepOrder = 2,
+                            stepTitle = failedStepTitle,
+                            actionType = ActionType.SET_INDEXED_RADIO,
+                            status = StepStatus.FAILED,
+                            startedAt = step2Start,
+                            finishedAt = System.currentTimeMillis(),
+                            expectedElement = deviceName,
+                            elementFound = false,
+                            actionAttempted = true,
+                            actionConfirmed = false,
+                            failureReason = failureReason,
+                            suggestedAction = suggestedAction,
+                            message = failureReason
+                        )
+                    )
+                    if (SafeModeManager.isTtsEnabled(context)) {
+                        TextToSpeechManager.speak(toggleRes.message)
+                    }
                 }
             } else {
                 completedCount++

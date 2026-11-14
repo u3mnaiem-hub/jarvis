@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Build
+import android.util.Log
 import android.webkit.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -23,6 +24,78 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.voiceagent.automation.engine.AutomationRecorderEngine
 import com.voiceagent.automation.model.ActionType
 import com.voiceagent.automation.model.AutomationStep
+
+private class JarvisWebSnifferBridge {
+    @JavascriptInterface
+    fun onRouterLoginSubmitted(username: String) {
+        if (!AutomationRecorderEngine.isRecordingActive) return
+        Log.i("JarvisWebSniffer", "Captured router login for user=$username")
+        AutomationRecorderEngine.addRecordedStep(
+            AutomationStep(
+                title = "Type Admin Username ($username)",
+                description = "Enter $username in Frm_Username",
+                actionType = ActionType.SET_TEXT,
+                selectorResourceId = "Frm_Username",
+                textPayload = username.ifBlank { "admin" },
+                delayAfterMs = 500L
+            )
+        )
+        AutomationRecorderEngine.addRecordedStep(
+            AutomationStep(
+                title = "Type Router Password",
+                description = "Enter stored router_password in Frm_Password",
+                actionType = ActionType.SET_TEXT,
+                selectorResourceId = "Frm_Password",
+                textPayload = "{{CREDENTIAL:router_password}}",
+                delayAfterMs = 500L
+            )
+        )
+        AutomationRecorderEngine.addRecordedStep(
+            AutomationStep(
+                title = "Click Login (LoginId)",
+                description = "Submit router login",
+                actionType = ActionType.CLICK_BY_ID,
+                selectorResourceId = "LoginId",
+                delayAfterMs = 3000L
+            )
+        )
+    }
+
+    @JavascriptInterface
+    fun onMenuClicked(elementId: String, label: String) {
+        if (!AutomationRecorderEngine.isRecordingActive) return
+        Log.i("JarvisWebSniffer", "Captured menu click id=$elementId ($label)")
+        AutomationRecorderEngine.addRecordedStep(
+            AutomationStep(
+                title = "Click Menu: ${label.ifBlank { elementId }}",
+                description = "Click router menu item #$elementId",
+                actionType = ActionType.CLICK_BY_ID,
+                selectorResourceId = elementId,
+                selectorText = label,
+                delayAfterMs = 2000L
+            )
+        )
+    }
+
+    @JavascriptInterface
+    fun onParentalControlRadioToggled(rowIndex: Int, deviceName: String, radioValue: String, instId: String) {
+        if (!AutomationRecorderEngine.isRecordingActive) return
+        val stateLabel = if (radioValue == "1") "Enable Restriction (قفل النت)" else "Disable Restriction (تشغيل النت)"
+        val targetDevice = deviceName.ifBlank { "TV" }
+        Log.i("JarvisWebSniffer", "Captured ParentalCtrl toggle row=$rowIndex device=$targetDevice val=$radioValue instId=$instId")
+        AutomationRecorderEngine.addRecordedStep(
+            AutomationStep(
+                title = "$stateLabel: $targetDevice",
+                description = "Find instName_ParentCtrl:N == $targetDevice -> click Enable:ParentCtrl:N ($radioValue)",
+                actionType = ActionType.SET_INDEXED_RADIO,
+                selectorResourceId = "instName_ParentCtrl:{i}",
+                selectorText = targetDevice,
+                textPayload = "Enable:ParentCtrl:{i}|$radioValue",
+                delayAfterMs = 1500L
+            )
+        )
+    }
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -194,6 +267,8 @@ fun InAppBrowserScreen(
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         }
 
+                        addJavascriptInterface(JarvisWebSnifferBridge(), "JarvisSniffer")
+
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 isLoading = true
@@ -204,6 +279,54 @@ fun InAppBrowserScreen(
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isLoading = false
                                 canGoBack = view?.canGoBack() ?: false
+                                url?.let { recordUrlIfActive(it) }
+                                // Inject ZTE Router & DOM Sniffer hook so recording in the built-in browser
+                                // captures deterministic HTTP/JS actions without relying on screen coordinates
+                                view?.evaluateJavascript(
+                                    """
+                                    (function() {
+                                        if (window.__jarvisSnifferInstalled) return;
+                                        window.__jarvisSnifferInstalled = true;
+
+                                        document.addEventListener('click', function(e) {
+                                            var el = e.target;
+                                            while (el && el !== document.body) {
+                                                var id = el.id || '';
+                                                if (id === 'LoginId') {
+                                                    var uEl = document.getElementById('Frm_Username');
+                                                    var uVal = uEl ? (uEl.value || 'admin') : 'admin';
+                                                    if (window.JarvisSniffer) window.JarvisSniffer.onRouterLoginSubmitted(uVal);
+                                                    break;
+                                                }
+                                                if (id === 'mmInternet' || id === 'smParentCtrl' || id.indexOf('mm') === 0 || id.indexOf('sm') === 0) {
+                                                    var txt = (el.innerText || el.textContent || id).trim();
+                                                    if (window.JarvisSniffer) window.JarvisSniffer.onMenuClicked(id, txt);
+                                                    break;
+                                                }
+                                                el = el.parentElement;
+                                            }
+                                        }, true);
+
+                                        document.addEventListener('change', function(e) {
+                                            var t = e.target;
+                                            if (!t || t.type !== 'radio') return;
+                                            var name = t.name || '';
+                                            if (name.indexOf('Enable:ParentCtrl:') === 0) {
+                                                var idxStr = name.split(':')[2] || '0';
+                                                var idx = parseInt(idxStr, 10) || 0;
+                                                var devEl = document.getElementById('instName_ParentCtrl:' + idx);
+                                                var devName = devEl ? (devEl.value || devEl.innerText || devEl.textContent || '').trim() : 'TV';
+                                                var instEl = document.getElementById('_InstID_ParentCtrl:' + idx) || document.getElementById('_InstID:' + idx);
+                                                var instId = instEl ? (instEl.value || '') : '';
+                                                if (window.JarvisSniffer) {
+                                                    window.JarvisSniffer.onParentalControlRadioToggled(idx, devName, String(t.value), instId);
+                                                }
+                                            }
+                                        }, true);
+                                    })();
+                                    """.trimIndent(),
+                                    null
+                                )
                             }
 
                             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {

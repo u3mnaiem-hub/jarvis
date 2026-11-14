@@ -668,6 +668,180 @@ fun HomeScreen(
             }
         }
 
+        // ZTE H188 Router Quick Control & Live Diagnostic Card
+        item {
+            var routerStatusText by remember { mutableStateOf<String?>(null) }
+            var routerDevices by remember {
+                mutableStateOf<List<com.voiceagent.automation.engine.ZteRouterHttpClient.ParentalControlDevice>>(emptyList())
+            }
+            var isRouterBusy by remember { mutableStateOf(false) }
+
+            fun triggerQuickRouterMacro(deviceName: String, radioVal: String) {
+                val label = if (radioVal == "0") "تشغيل النت: $deviceName" else "قفل النت: $deviceName"
+                val quickAuto = Automation(
+                    name = label,
+                    nameAr = label,
+                    description = "ZTE H188 Hybrid HTTP + Native JS Macro for $deviceName",
+                    triggerPhrases = listOf(label),
+                    targetPackage = "com.android.chrome",
+                    steps = listOf(
+                        com.voiceagent.automation.model.AutomationStep(
+                            order = 1,
+                            title = "Open Router 192.168.1.1",
+                            actionType = com.voiceagent.automation.model.ActionType.OPEN_URL,
+                            url = "https://192.168.1.1/"
+                        ),
+                        com.voiceagent.automation.model.AutomationStep(
+                            order = 2,
+                            title = "Toggle $deviceName -> $radioVal",
+                            actionType = com.voiceagent.automation.model.ActionType.SET_INDEXED_RADIO,
+                            selectorResourceId = "instName_ParentCtrl:{i}",
+                            selectorText = deviceName,
+                            textPayload = "Enable:ParentCtrl:{i}|$radioVal"
+                        )
+                    )
+                )
+                AutomationExecutionEngine.executeAutomation(context, quickAuto)
+            }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Router, contentDescription = null, tint = Emerald600)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "تحكم مباشر في الراوتر (ZTE H188)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = "بروتوكول HTTP مباشر + جسر JavaScript الأصلي للراوتر",
+                                    fontSize = 11.sp,
+                                    color = LightTextSecondary
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (!isRouterBusy) {
+                                    isRouterBusy = true
+                                    routerStatusText = "جاري الاتصال بالراوتر 192.168.1.1 وفحص التوكن..."
+                                    coroutineScope.launch {
+                                        try {
+                                            val (client, loginRes) = AutomationExecutionEngine.loginToZteRouter(db)
+                                            if (loginRes.success) {
+                                                val devices = client.fetchParentalControlDevices()
+                                                client.logout()
+                                                routerDevices = devices
+                                                routerStatusText = if (devices.isNotEmpty()) {
+                                                    "تم الدخول بنجاح! تم العثور على ${devices.size} قاعدة في Parental Control."
+                                                } else {
+                                                    "تم الدخول للراوتر بنجاح! يمكنك تشغيل أو قفل النت من الأزرار بالأسفل."
+                                                }
+                                            } else {
+                                                routerStatusText = "نتيجة الفحص: ${loginRes.message}"
+                                            }
+                                        } catch (e: Exception) {
+                                            routerStatusText = "خطأ أثناء الفحص: ${e.message}"
+                                        } finally {
+                                            isRouterBusy = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isRouterBusy,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            if (isRouterBusy) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text("فحص الأجهزة", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { triggerQuickRouterMacro("TV", "0") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("تشغيل نت التلفزيون", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { triggerQuickRouterMacro("TV", "1") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Red600),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("قفل نت التلفزيون", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (routerStatusText != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = routerStatusText!!,
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (routerDevices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        routerDevices.forEach { dev ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "#${dev.rowIndex}: ${dev.deviceName} (${if (dev.isRestrictionEnabled) "مقفل" else "مفتوح"})",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    TextButton(onClick = { triggerQuickRouterMacro(dev.deviceName, "0") }) {
+                                        Text("تشغيل", color = Emerald600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    TextButton(onClick = { triggerQuickRouterMacro(dev.deviceName, "1") }) {
+                                        Text("قفل", color = Red600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Quick Action Buttons (Compact & Responsive on all screen widths)
         item {
             Row(

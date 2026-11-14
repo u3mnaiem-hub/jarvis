@@ -26,11 +26,16 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
 /**
- * Direct HTTP client for the ZTE H188 (WE Egypt) router macro.
+ * Direct HTTP Protocol Engine for the ZTE H188 (WE Egypt) router macro.
  *
- * Uses OkHttp with an in-memory [CookieJar] that persists cookies across all requests in one run,
- * trusts the router's self-signed certificate for the target host only, and never uses a WebView,
- * AccessibilityService, or coordinate taps.
+ * Implements the exact two-token + challenge protocol discovered in the router's live source code:
+ * 1. `_sessionTmpToken` (in `<head>`, hex-escaped `\xNN`) is used for authenticated AJAX `dataPost()` and `LogOff()`.
+ * 2. `LoginFormObj.addParameter("_sessionTOKEN", "...")` (inside `g_loginToken(xml)`) is a SEPARATE 24-digit token
+ *    required by the login POST (`action=login`).
+ * 3. `/function_module/login_module/login_page/logintoken_lua.lua` returns `<ajax_response_xml_root>SALT</ajax_response_xml_root>`,
+ *    and the login password is `sha256(plainPassword + SALT)`.
+ * 4. Parental Control toggles (`InstSwitch`) send `IF_ACTION=Apply&Enable=<1|0>&_InstID=<id>&_sessionTOKEN=<_sessionTmpToken>`
+ *    with custom HTTP header `Check: sha256(PostDataTmp)`.
  */
 class ZteRouterHttpClient(
     val baseUrl: String = "https://192.168.1.1/",
@@ -43,6 +48,10 @@ class ZteRouterHttpClient(
 
     /** Session token (`_sessionTmpToken`) decoded as a 24-digit string, refreshed as pages are fetched. */
     var currentSessionToken: String? = null
+        private set
+
+    /** Login-specific `_sessionTOKEN` embedded inside `LoginFormObj.addParameter("_sessionTOKEN", "...")`. */
+    var currentLoginFormToken: String? = null
         private set
 
     /** Last authenticated HTML body returned by login or page fetches. */
@@ -127,7 +136,8 @@ class ZteRouterHttpClient(
         val success: Boolean,
         val message: String,
         val httpStatusCode: Int = -1,
-        val failureType: FailureType? = null
+        val failureType: FailureType? = null,
+        val devices: List<ParentalControlDevice> = emptyList()
     )
 
     private fun logStep(stepName: String, statusCode: Int, detail: String = "") {
@@ -173,6 +183,22 @@ class ZteRouterHttpClient(
     }
 
     /**
+     * Extracts the login-specific `_sessionTOKEN` from `LoginFormObj.addParameter("_sessionTOKEN", "...")`
+     * inside `g_loginToken(xml)`. Falls back to `_sessionTmpToken` only if not separately present.
+     */
+    fun extractLoginFormTokenFromHtml(html: String): String? {
+        val regex = Regex("""addParameter\(\s*["']_sessionTOKEN["']\s*,\s*["']([^"']+)["']\s*\)""")
+        val match = regex.find(html)
+        if (match != null) {
+            val raw = decodeHexEscapes(match.groupValues[1]).trim()
+            if (raw.isNotEmpty() && raw != "_sessionTmpToken") {
+                return raw
+            }
+        }
+        return extractSessionTokenFromHtml(html)
+    }
+
+    /**
      * Lowercase 64-character hex SHA-256 digest of [input].
      */
     fun sha256Hex(input: String): String {
@@ -185,7 +211,7 @@ class ZteRouterHttpClient(
     }
 
     /**
-     * Step 1: Fetch the login page and read `_sessionTmpToken`.
+     * Step 1: Fetch the login page and read both `_sessionTmpToken` and `LoginFormObj._sessionTOKEN`.
      */
     suspend fun fetchLoginPageAndToken(): RouterLoginResult = withContext(Dispatchers.IO) {
         val url = normalizedBaseUrl
@@ -210,7 +236,6 @@ class ZteRouterHttpClient(
                     )
                 }
 
-                // If session is already authenticated from cookies
                 if (isAuthenticatedHtml(html)) {
                     val existingTok = extractSessionTokenFromHtml(html) ?: currentSessionToken.orEmpty()
                     currentSessionToken = existingTok
@@ -218,17 +243,23 @@ class ZteRouterHttpClient(
                     return@withContext RouterLoginResult.Success(existingTok, html)
                 }
 
-                val token = extractSessionTokenFromHtml(html)
-                if (token.isNullOrBlank()) {
+                val tmpToken = extractSessionTokenFromHtml(html)
+                val loginFormToken = extractLoginFormTokenFromHtml(html)
+                if (tmpToken.isNullOrBlank() && loginFormToken.isNullOrBlank()) {
                     return@withContext RouterLoginResult.Failure(
                         FailureType.TOKEN_NOT_FOUND,
                         "Token not found: _sessionTmpToken was not present in $url response",
                         code
                     )
                 }
-                currentSessionToken = token
-                logStep("ReadSessionToken", code, "Decoded ${token.length}-char _sessionTmpToken")
-                RouterLoginResult.Success(token, html)
+                currentSessionToken = tmpToken ?: loginFormToken
+                currentLoginFormToken = loginFormToken ?: tmpToken
+                logStep(
+                    "ReadSessionToken",
+                    code,
+                    "tmpTokenLen=${currentSessionToken?.length ?: 0}, loginFormTokenLen=${currentLoginFormToken?.length ?: 0}"
+                )
+                RouterLoginResult.Success(currentSessionToken.orEmpty(), html)
             }
         } catch (e: SSLHandshakeException) {
             logStep("FetchLoginPage", -1, "SSL certificate error: ${e.message}")
@@ -247,7 +278,7 @@ class ZteRouterHttpClient(
 
     /**
      * Fetches the one-time login challenge (`xmlObj`) from `/function_module/login_module/login_page/logintoken_lua.lua`
-     * if the router's `g_loginToken` script uses it (`var SHA256Password = sha256(Password + xmlObj)`).
+     * which returns `<ajax_response_xml_root>16037604</ajax_response_xml_root>`.
      */
     private fun fetchLoginChallengeSalt(): String? {
         val challengeUrl = "${normalizedBaseUrl}function_module/login_module/login_page/logintoken_lua.lua"
@@ -262,9 +293,10 @@ class ZteRouterHttpClient(
         return try {
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                logStep("FetchLoginChallenge", resp.code)
                 val m = Regex("""<ajax_response_xml_root>([^<]+)</ajax_response_xml_root>""").find(body)
-                m?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+                val salt = m?.groupValues?.get(1)?.trim()
+                logStep("FetchLoginChallenge", resp.code, "saltLen=${salt?.length ?: 0}")
+                salt?.takeIf { it.isNotEmpty() }
             }
         } catch (e: Exception) {
             Log.w(TAG, "fetchLoginChallengeSalt failed: ${e.message}")
@@ -275,19 +307,18 @@ class ZteRouterHttpClient(
     /**
      * Reusable login function for ZTE H188 router macros.
      *
-     * - Reads fresh `_sessionTmpToken` on each attempt.
-     * - Inspects the login page script (`g_loginToken` / `logintoken_lua.lua`) and tries up to 3 candidates
-     *   in order with a 5-second pause between attempts, never retrying in a tight loop.
-     * - Posts `Username`, `Password`, `action`, `_sessionTOKEN` as `application/x-www-form-urlencoded`.
+     * Attempt 1 (Exact ZTE H188 Firmware Formula):
+     *   - `_sessionTOKEN` = `LoginFormObj.addParameter("_sessionTOKEN", ...)` (the 24-digit login form token)
+     *   - `Password` = `sha256(plainPassword + xmlChallenge)` from `logintoken_lua.lua`
+     * Attempt 2 (Fallback with `_sessionTmpToken` + `logintoken_lua.lua` or `sha256(plainPassword + token)`):
+     *   - After a 5-second pause
+     * Attempt 3 (Fallback `sha256(sha256(plainPassword) + token)`):
+     *   - After a 5-second pause
      */
     suspend fun login(
         plainPassword: String,
         username: String = "admin"
     ): RouterLoginResult = withContext(Dispatchers.IO) {
-        // Formula candidates in priority order (max 3 total login attempts):
-        // 1. Exact formula from ZTE H188 login page JS (`g_loginToken` fetches logintoken_lua.lua -> sha256(plainPassword + xmlObj), fallback to sha256(plainPassword + token))
-        // 2. sha256(plainPassword + token) / sha256(token + plainPassword)
-        // 3. sha256(sha256(plainPassword) + token)
         val maxAttempts = 3
         var lastFailure: RouterLoginResult.Failure? = null
 
@@ -298,7 +329,8 @@ class ZteRouterHttpClient(
             }
 
             val pageRes = fetchLoginPageAndToken()
-            val token: String
+            val tmpToken: String
+            val loginFormToken: String
             val loginHtml: String
             when (pageRes) {
                 is RouterLoginResult.Failure -> return@withContext pageRes
@@ -307,7 +339,8 @@ class ZteRouterHttpClient(
                         logStep("Login", 200, "Already authenticated")
                         return@withContext pageRes
                     }
-                    token = pageRes.sessionToken
+                    tmpToken = currentSessionToken ?: pageRes.sessionToken
+                    loginFormToken = currentLoginFormToken ?: tmpToken
                     loginHtml = pageRes.html
                 }
             }
@@ -322,34 +355,38 @@ class ZteRouterHttpClient(
                 )
             }
 
-            val usesLoginTokenLua = loginHtml.contains("logintoken_lua.lua") &&
-                loginHtml.contains("sha256(Password+xmlObj)")
-
+            val xmlChallenge = fetchLoginChallengeSalt()
             val passwordHash: String
+            val postSessionToken: String
             val formulaLabel: String
+
             when (attempt) {
                 1 -> {
-                    val xmlChallenge = if (usesLoginTokenLua) fetchLoginChallengeSalt() else null
+                    // Exact ZTE H188 WE firmware behavior from lines 3588-3595 of router HTML:
+                    // Password = sha256(Password + xmlObj), _sessionTOKEN = LoginFormObj._sessionTOKEN
+                    postSessionToken = loginFormToken
                     if (!xmlChallenge.isNullOrBlank()) {
                         passwordHash = sha256Hex(plainPassword + xmlChallenge)
-                        formulaLabel = "sha256(password + logintoken_lua)"
+                        formulaLabel = "sha256(password + logintoken_lua) with LoginFormObj._sessionTOKEN"
                     } else {
-                        passwordHash = sha256Hex(plainPassword + token)
-                        formulaLabel = "sha256(password + token)"
+                        passwordHash = sha256Hex(plainPassword + loginFormToken)
+                        formulaLabel = "sha256(password + LoginFormObj._sessionTOKEN)"
                     }
                 }
                 2 -> {
-                    // If attempt 1 used logintoken_lua, try direct sha256(password + token); otherwise sha256(token + password)
-                    if (usesLoginTokenLua) {
-                        passwordHash = sha256Hex(plainPassword + token)
-                        formulaLabel = "sha256(password + token)"
+                    // Fallback 2: Use _sessionTmpToken as _sessionTOKEN with xmlChallenge or sha256(password + tmpToken)
+                    postSessionToken = tmpToken
+                    if (!xmlChallenge.isNullOrBlank() && tmpToken != loginFormToken) {
+                        passwordHash = sha256Hex(plainPassword + xmlChallenge)
+                        formulaLabel = "sha256(password + logintoken_lua) with _sessionTmpToken"
                     } else {
-                        passwordHash = sha256Hex(token + plainPassword)
-                        formulaLabel = "sha256(token + password)"
+                        passwordHash = sha256Hex(plainPassword + tmpToken)
+                        formulaLabel = "sha256(password + _sessionTmpToken)"
                     }
                 }
                 else -> {
-                    passwordHash = sha256Hex(sha256Hex(plainPassword) + token)
+                    postSessionToken = loginFormToken
+                    passwordHash = sha256Hex(sha256Hex(plainPassword) + (xmlChallenge ?: tmpToken))
                     formulaLabel = "sha256(sha256(password) + token)"
                 }
             }
@@ -367,13 +404,14 @@ class ZteRouterHttpClient(
                 .add("Username", username)
                 .add("Password", passwordHash)
                 .add("action", "login")
-                .add("_sessionTOKEN", token)
+                .add("_sessionTOKEN", postSessionToken)
                 .build()
 
             val postReq = Request.Builder()
                 .url(normalizedBaseUrl)
                 .header("User-Agent", USER_AGENT)
                 .header("Referer", normalizedBaseUrl)
+                .header("Origin", normalizedBaseUrl.removeSuffix("/"))
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .post(formBody)
                 .build()
@@ -385,8 +423,8 @@ class ZteRouterHttpClient(
                     val respHtml = response.body?.string().orEmpty()
                     logStep("LoginAttempt#$attempt", code, "formula=$formulaLabel, responseLen=${respHtml.length}")
 
-                    // Update session token if present in response
                     extractSessionTokenFromHtml(respHtml)?.let { currentSessionToken = it }
+                    extractLoginFormTokenFromHtml(respHtml)?.let { currentLoginFormToken = it }
 
                     if (!response.isSuccessful) {
                         lastFailure = RouterLoginResult.Failure(
@@ -402,12 +440,11 @@ class ZteRouterHttpClient(
                         lastAuthenticatedHtml = respHtml
                         logStep("LoginSuccess", code, "Authenticated on attempt #$attempt ($formulaLabel)")
                         return@withContext RouterLoginResult.Success(
-                            currentSessionToken ?: token,
+                            currentSessionToken ?: postSessionToken,
                             respHtml
                         )
                     }
 
-                    // Inspect explicit router error variables in the returned login page
                     val loginErrMsg = extractJsVar(respHtml, "login_err_msg").orEmpty()
                     val promptMsg = extractJsVar(respHtml, "prompt_msg").orEmpty()
                     val lockSec = extractLockWaitSeconds(respHtml)
@@ -424,9 +461,7 @@ class ZteRouterHttpClient(
                             reason,
                             code
                         )
-                        // If the router explicitly locked login or rejected credentials on the page's native formula,
-                        // do not hammer the router if locked.
-                        if (lockSec > 0 || (attempt == 1 && usesLoginTokenLua && explicitErr.isNotBlank())) {
+                        if (lockSec > 0 || (attempt == 1 && explicitErr.isNotBlank())) {
                             return@withContext lastFailure!!
                         }
                     } else {
@@ -484,28 +519,12 @@ class ZteRouterHttpClient(
     }
 
     /**
-     * Step 3: Navigates to / fetches the Parental Control page and toggles `Enable` for [deviceName].
-     *
-     * Logs every request URL, method, and form field names in debug mode so any router-specific endpoints
-     * or parameters are visible in logs.
+     * Lists all Parental Control devices currently configured on the router without changing them.
      */
-    suspend fun setParentalControlDeviceState(
-        deviceName: String,
-        enableRule: Boolean
-    ): ParentalControlToggleResult = withContext(Dispatchers.IO) {
-        val targetValue = if (enableRule) "1" else "0"
-
-        // 1. Discover the Parental Control page URL from `menu_items` / `menu_subitems` for `smParentCtrl`
+    suspend fun fetchParentalControlDevices(): Pair<String?, List<ParentalControlDevice>> = withContext(Dispatchers.IO) {
         val parentCtrlPageName = findMenuPageInHtml(lastAuthenticatedHtml, "smParentCtrl")
             ?: fetchInternetMenuAndFindParentCtrl()
-
-        if (parentCtrlPageName.isNullOrBlank()) {
-            return@withContext ParentalControlToggleResult(
-                success = false,
-                message = "Login succeeded, but the Parental Control page URL (smParentCtrl) could not be found in menu metadata. Check debug logs or capture the toggle request from Chrome's Network tab.",
-                failureType = FailureType.DEVICE_CONTROL_ERROR
-            )
-        }
+            ?: return@withContext null to emptyList()
 
         val pageRelativeUrl = if (parentCtrlPageName.startsWith("getpage.lua")) {
             parentCtrlPageName
@@ -526,27 +545,14 @@ class ZteRouterHttpClient(
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 logStep("FetchParentalControlPage", resp.code, "len=${body.length}")
-                if (!resp.isSuccessful) {
-                    return@withContext ParentalControlToggleResult(
-                        success = false,
-                        message = "Failed to load Parental Control page ($fullPageUrl): HTTP ${resp.code}",
-                        httpStatusCode = resp.code,
-                        failureType = FailureType.DEVICE_CONTROL_ERROR
-                    )
-                }
+                if (!resp.isSuccessful) return@withContext null to emptyList()
                 extractSessionTokenFromHtml(body)?.let { currentSessionToken = it }
                 body
             }
         } catch (e: IOException) {
-            logStep("FetchParentalControlPage", -1, "Network error: ${e.message}")
-            return@withContext ParentalControlToggleResult(
-                success = false,
-                message = "Network error loading Parental Control page: ${e.message}",
-                failureType = FailureType.NETWORK_OR_CERTIFICATE_ERROR
-            )
+            return@withContext null to emptyList()
         }
 
-        // 2. Extract the data ServerAddr from `<address><span>...</span></address>` inside the Parental Control HTML
         val serverAddrs = Regex("""<address[^>]*>\s*<span[^>]*>([^<]+)</span>\s*</address>""", RegexOption.IGNORE_CASE)
             .findAll(pageHtml)
             .map { it.groupValues[1].trim() }
@@ -555,16 +561,8 @@ class ZteRouterHttpClient(
 
         val parentCtrlServerAddr = serverAddrs.firstOrNull { it.contains("ParentCtrl", ignoreCase = true) }
             ?: serverAddrs.firstOrNull()
+            ?: return@withContext null to emptyList()
 
-        if (parentCtrlServerAddr.isNullOrBlank()) {
-            return@withContext ParentalControlToggleResult(
-                success = false,
-                message = "Loaded Parental Control HTML, but no <address><span> data endpoint was found. Please capture the toggle POST request from Chrome's Network tab.",
-                failureType = FailureType.DEVICE_CONTROL_ERROR
-            )
-        }
-
-        // 3. GET the XML data from `parentCtrlServerAddr` to list devices (0..10) and their `_InstID`
         val dataUrl = normalizedBaseUrl + parentCtrlServerAddr.removePrefix("/")
         logDebugRequest("FetchParentalControlDataXml", "GET", dataUrl)
 
@@ -579,31 +577,40 @@ class ZteRouterHttpClient(
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 logStep("FetchParentalControlDataXml", resp.code, "len=${body.length}")
-                if (!resp.isSuccessful) {
-                    return@withContext ParentalControlToggleResult(
-                        success = false,
-                        message = "Failed to load Parental Control XML ($dataUrl): HTTP ${resp.code}",
-                        httpStatusCode = resp.code,
-                        failureType = FailureType.DEVICE_CONTROL_ERROR
-                    )
-                }
+                if (!resp.isSuccessful) return@withContext dataUrl to emptyList()
                 body
             }
         } catch (e: IOException) {
-            return@withContext ParentalControlToggleResult(
-                success = false,
-                message = "Network error fetching Parental Control XML: ${e.message}",
-                failureType = FailureType.NETWORK_OR_CERTIFICATE_ERROR
-            )
+            return@withContext dataUrl to emptyList()
         }
 
         val devices = parseParentalControlDevicesFromXml(xmlBody)
-        logStep("ParseParentalControlDevices", 200, "Found ${devices.size} rules: ${devices.joinToString { "${it.index}:${it.name}(${it.instId})" }}")
+        logStep("ParseParentalControlDevices", 200, "Found ${devices.size} rules: ${devices.joinToString { "${it.index}:${it.name}(${it.instId})=${it.currentEnable}" }}")
+        dataUrl to devices
+    }
+
+    /**
+     * Step 3: Navigates to / fetches the Parental Control page and toggles `Enable` for [deviceName].
+     */
+    suspend fun setParentalControlDeviceState(
+        deviceName: String,
+        enableRule: Boolean
+    ): ParentalControlToggleResult = withContext(Dispatchers.IO) {
+        val targetValue = if (enableRule) "1" else "0"
+        val (dataUrl, devices) = fetchParentalControlDevices()
+
+        if (dataUrl.isNullOrBlank()) {
+            return@withContext ParentalControlToggleResult(
+                success = false,
+                message = "Login succeeded, but the Parental Control data endpoint could not be resolved via HTTP.",
+                failureType = FailureType.DEVICE_CONTROL_ERROR
+            )
+        }
 
         if (devices.isEmpty()) {
             return@withContext ParentalControlToggleResult(
                 success = false,
-                message = "No Parental Control device rules were found in $parentCtrlServerAddr XML response. If the toggle request uses a different endpoint, please capture it from Chrome's Network tab.",
+                message = "No Parental Control device rules were found at $dataUrl.",
                 failureType = FailureType.DEVICE_CONTROL_ERROR
             )
         }
@@ -620,7 +627,8 @@ class ZteRouterHttpClient(
             return@withContext ParentalControlToggleResult(
                 success = false,
                 message = "Device '$deviceName' not found in Parental Control rules. Available: $available",
-                failureType = FailureType.DEVICE_CONTROL_ERROR
+                failureType = FailureType.DEVICE_CONTROL_ERROR,
+                devices = devices
             )
         }
         if (matches.size > 1) {
@@ -628,16 +636,17 @@ class ZteRouterHttpClient(
             return@withContext ParentalControlToggleResult(
                 success = false,
                 message = "Multiple Parental Control rules matched '$deviceName': $matchedList",
-                failureType = FailureType.DEVICE_CONTROL_ERROR
+                failureType = FailureType.DEVICE_CONTROL_ERROR,
+                devices = devices
             )
         }
 
         val targetDevice = matches.first()
         val token = currentSessionToken ?: ""
 
-        // 4. Build the exact ZTE `InstSwitch` POST payload discovered in the router's JS:
-        //    var PostData = "IF_ACTION=Apply&Enable=" + instSwitchValue + "&_InstID=" + _InstIDValue + "&_sessionTOKEN=" + _sessionTmpToken;
-        //    Header: Check = sha256(PostData)
+        // Exact ZTE `InstSwitch` POST payload from router JS line 5900:
+        // PostData = "IF_ACTION=Apply&Enable=" + instSwitchValue + "&_InstID=" + _InstIDValue + "&_sessionTOKEN=" + _sessionTmpToken
+        // Header: Check = sha256(PostData)
         val postFields = linkedMapOf(
             "IF_ACTION" to "Apply",
             "Enable" to targetValue,
@@ -676,15 +685,17 @@ class ZteRouterHttpClient(
                     return@withContext ParentalControlToggleResult(
                         success = true,
                         message = "Parental Control rule for '${targetDevice.name}' (index ${targetDevice.index}, _InstID=${targetDevice.instId}) set to Enable=$targetValue and confirmed (IF_ERRORSTR=SUCC).",
-                        httpStatusCode = code
+                        httpStatusCode = code,
+                        devices = devices
                     )
                 }
 
                 return@withContext ParentalControlToggleResult(
                     success = false,
-                    message = "Toggle POST to $parentCtrlServerAddr returned HTTP $code (IF_ERRORSTR=${errStr ?: "unknown"}). Please capture the Parental Control toggle request from Chrome's Network tab so we can verify the exact fields.",
+                    message = "Toggle POST to $dataUrl returned HTTP $code (IF_ERRORSTR=${errStr ?: "unknown"}).",
                     httpStatusCode = code,
-                    failureType = FailureType.DEVICE_CONTROL_ERROR
+                    failureType = FailureType.DEVICE_CONTROL_ERROR,
+                    devices = devices
                 )
             }
         } catch (e: IOException) {
@@ -692,18 +703,17 @@ class ZteRouterHttpClient(
             return@withContext ParentalControlToggleResult(
                 success = false,
                 message = "Network error sending Parental Control toggle POST: ${e.message}",
-                failureType = FailureType.NETWORK_OR_CERTIFICATE_ERROR
+                failureType = FailureType.NETWORK_OR_CERTIFICATE_ERROR,
+                devices = devices
             )
         }
     }
 
     private fun findMenuPageInHtml(html: String, menuId: String): String? {
         if (html.isBlank()) return null
-        // Look for `menu_items[...]['smParentCtrl']['page'] = '...'` or `menu_subitems[...]['smParentCtrl']['page'] = '...'`
         val jsRegex = Regex("""\[['"]$menuId['"]\]\s*\[\s*['"]page['"]\s*\]\s*=\s*['"]([^'"]+)['"]""")
         jsRegex.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
 
-        // Or rendered HTML attribute: id='smParentCtrl' ... MenuPage='...'
         val attrRegex1 = Regex("""id\s*=\s*['"]$menuId['"][^>]*MenuPage\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
         attrRegex1.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { return it }
 
@@ -775,10 +785,6 @@ class ZteRouterHttpClient(
 
     /**
      * Step 4: Always log out at the end of the macro so the router's single admin session is released.
-     *
-     * Mirrors ZTE `LogOff()` in HTML:
-     *   1. GET `/common_page/template_token_check.lua?sessToken=<_sessionTmpToken>`
-     *   2. POST `IF_LogOff=1&sess_token=<_sessionTmpToken>` to `https://192.168.1.1/`
      */
     suspend fun logout(): Boolean = withContext(Dispatchers.IO) {
         val token = currentSessionToken

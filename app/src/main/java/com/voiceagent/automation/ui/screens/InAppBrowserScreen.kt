@@ -61,6 +61,36 @@ fun InAppBrowserScreen(
         webViewInstance?.goBack()
     }
 
+    // Whenever a new recording session starts or this screen opens fresh, clear WebView cookies/cache/history
+    // so it never stays stuck on the last visited page or stale session.
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+            webViewInstance?.apply {
+                stopLoading()
+                clearCache(true)
+                clearHistory()
+                clearFormData()
+                urlText = initialUrl
+                currentUrl = initialUrl
+                loadUrl(initialUrl)
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewInstance?.apply {
+                stopLoading()
+                clearHistory()
+                destroy()
+            }
+            webViewInstance = null
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -187,6 +217,12 @@ fun InAppBrowserScreen(
                             }
                         }
                         webChromeClient = WebChromeClient()
+                        CookieManager.getInstance().removeAllCookies(null)
+                        CookieManager.getInstance().flush()
+                        WebStorage.getInstance().deleteAllData()
+                        clearCache(true)
+                        clearHistory()
+                        clearFormData()
                         loadUrl(currentUrl)
                         webViewInstance = this
                     }

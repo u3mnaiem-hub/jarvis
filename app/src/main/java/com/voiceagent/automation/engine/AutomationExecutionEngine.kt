@@ -78,6 +78,18 @@ object AutomationExecutionEngine {
                 totalSteps.coerceAtLeast(1)
             )
 
+            val isDirectRouterMacro = isZteRouterWorkflow(automation)
+            if (isDirectRouterMacro) {
+                executeDirectZteRouterMacro(
+                    context = context,
+                    db = db,
+                    automation = automation,
+                    startTime = startTime,
+                    onComplete = onComplete
+                )
+                return@launch
+            }
+
             val isWebMacro = automation.macroType == MacroType.WEB_MACRO
             var webEngine: WebMacroEngine? = if (isWebMacro) WebMacroEngine(context) else null
             var lastWaitedElementText: String? = null
@@ -1203,5 +1215,248 @@ object AutomationExecutionEngine {
         }
 
         onComplete?.invoke(isSuccess, failureReason)
+    }
+
+    private fun isZteRouterWorkflow(automation: Automation): Boolean {
+        if (automation.id in listOf("demo_enable_tv_internet", "demo_disable_tv_internet")) return true
+        val hasRouterUrl = automation.steps.any {
+            val u = it.url?.lowercase() ?: ""
+            u.contains("192.168.1.1")
+        }
+        val hasZteSelectors = automation.steps.any {
+            it.cssSelector?.contains("Frm_Username") == true ||
+                it.cssSelector?.contains("Frm_Password") == true ||
+                it.cssSelector?.contains("LoginId") == true ||
+                it.actionType == ActionType.SET_INDEXED_RADIO
+        }
+        return hasRouterUrl && hasZteSelectors
+    }
+
+    /**
+     * Reusable direct HTTP login helper exposed in Jarvis so future macros for this router
+     * can call `loginToZteRouter(...)` and then send their own requests using the returned [ZteRouterHttpClient].
+     */
+    suspend fun loginToZteRouter(
+        db: VoiceAgentDatabase,
+        baseUrl: String = "https://192.168.1.1/",
+        credentialKey: String = "router_admin_pass",
+        username: String = "admin"
+    ): Pair<ZteRouterHttpClient, ZteRouterHttpClient.RouterLoginResult> {
+        val client = ZteRouterHttpClient(baseUrl = baseUrl, debugMode = true)
+        val cred = db.credentialDao().getCredentialByKey(credentialKey)
+            ?: db.credentialDao().getCredentialByKey("router_password")
+            ?: db.credentialDao().getCredentialByKey("router_admin_pass")
+            ?: return client to ZteRouterHttpClient.RouterLoginResult.Failure(
+                ZteRouterHttpClient.FailureType.LOGIN_REJECTED,
+                "Router password not found in secure Credential Vault (key '$credentialKey'). Please save your router password in Credentials first."
+            )
+        val plainPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
+        db.credentialDao().updateLastUsed(cred.keyName, System.currentTimeMillis())
+        val loginRes = client.login(plainPassword = plainPassword, username = username)
+        return client to loginRes
+    }
+
+    private suspend fun executeDirectZteRouterMacro(
+        context: Context,
+        db: VoiceAgentDatabase,
+        automation: Automation,
+        startTime: Long,
+        onComplete: ((Boolean, String?) -> Unit)?
+    ) {
+        val stepDetails = mutableListOf<StepExecutionDetail>()
+        val radioStep = automation.steps.firstOrNull {
+            it.actionType == ActionType.SET_INDEXED_RADIO || !it.indexedNamePattern.isNullOrBlank()
+        }
+        val deviceName = radioStep?.rowContextText?.takeIf { it.isNotBlank() }
+            ?: radioStep?.selectorText?.takeIf { it.isNotBlank() }
+            ?: "Smart-TV"
+        val enableRule = when {
+            radioStep?.targetRadioValue != null -> radioStep.targetRadioValue == "1"
+            automation.id == "demo_disable_tv_internet" -> true
+            else -> false
+        }
+        val credKey = automation.steps.firstOrNull { it.actionType == ActionType.INJECT_CREDENTIAL }
+            ?.credentialKey ?: "router_admin_pass"
+
+        val baseUrl = "https://192.168.1.1/"
+        var client: ZteRouterHttpClient? = null
+        var isOverallSuccess = false
+        var failedStepTitle: String? = null
+        var failureReason: String? = null
+        var failureCategory: String? = null
+        var suggestedAction: String? = null
+        var completedCount = 0
+        val totalLogicalSteps = 3
+
+        try {
+            // Step 1 & 2: Direct HTTP Login (GET token -> POST SHA-256 credentials)
+            val step1Start = System.currentTimeMillis()
+            AutomationForegroundService.start(
+                context,
+                automation.name,
+                "1. Direct HTTPS Login to $baseUrl",
+                1,
+                totalLogicalSteps
+            )
+            val (httpClient, loginResult) = loginToZteRouter(
+                db = db,
+                baseUrl = baseUrl,
+                credentialKey = credKey,
+                username = "admin"
+            )
+            client = httpClient
+
+            when (loginResult) {
+                is ZteRouterHttpClient.RouterLoginResult.Failure -> {
+                    failedStepTitle = "Direct HTTP Router Login"
+                    failureReason = loginResult.message + "\n" + httpClient.stepLogs.joinToString("\n")
+                    failureCategory = loginResult.category.name
+                    suggestedAction = when (loginResult.category) {
+                        ZteRouterHttpClient.FailureType.TOKEN_NOT_FOUND ->
+                            "Verify the phone is connected to the ZTE H188 Wi-Fi and https://192.168.1.1/ returns the router login page."
+                        ZteRouterHttpClient.FailureType.LOGIN_REJECTED ->
+                            "Check the router password in Credential Vault or wait if the router is temporarily locked."
+                        ZteRouterHttpClient.FailureType.LOGIN_PAGE_RETURNED_AGAIN ->
+                            "The login page was returned again without an explicit error. Check the debug logs for the SHA-256 formula tried."
+                        ZteRouterHttpClient.FailureType.NETWORK_OR_CERTIFICATE_ERROR ->
+                            "Check Wi-Fi connectivity to 192.168.1.1."
+                        else -> "Check Execution History logs."
+                    }
+                    stepDetails.add(
+                        StepExecutionDetail(
+                            stepOrder = 1,
+                            stepTitle = "Direct HTTP Router Login",
+                            actionType = ActionType.INJECT_CREDENTIAL,
+                            status = StepStatus.FAILED,
+                            startedAt = step1Start,
+                            finishedAt = System.currentTimeMillis(),
+                            expectedElement = "_sessionTmpToken / mmInternet",
+                            elementFound = loginResult.category != ZteRouterHttpClient.FailureType.TOKEN_NOT_FOUND,
+                            actionAttempted = true,
+                            actionConfirmed = false,
+                            failureReason = failureReason,
+                            suggestedAction = suggestedAction,
+                            message = failureReason
+                        )
+                    )
+                    if (SafeModeManager.isTtsEnabled(context)) {
+                        TextToSpeechManager.speak(loginResult.message)
+                    }
+                    recordLogAndFinish(
+                        db, context, automation, startTime, false,
+                        completedCount, totalLogicalSteps, failedStepTitle, failureReason,
+                        failureCategory, suggestedAction, stepDetails, onComplete
+                    )
+                    return
+                }
+                is ZteRouterHttpClient.RouterLoginResult.Success -> {
+                    completedCount++
+                    stepDetails.add(
+                        StepExecutionDetail(
+                            stepOrder = 1,
+                            stepTitle = "Direct HTTP Router Login",
+                            actionType = ActionType.INJECT_CREDENTIAL,
+                            status = StepStatus.SUCCESS,
+                            startedAt = step1Start,
+                            finishedAt = System.currentTimeMillis(),
+                            expectedElement = "mmInternet",
+                            elementFound = true,
+                            actionAttempted = true,
+                            actionConfirmed = true,
+                            message = "Authenticated via OkHttp HTTPS. Token length=${loginResult.sessionToken.length}"
+                        )
+                    )
+                }
+            }
+
+            // Step 3: Parental Control Toggle via Direct HTTP
+            val step2Start = System.currentTimeMillis()
+            AutomationForegroundService.start(
+                context,
+                automation.name,
+                "2. Toggle Parental Control for $deviceName",
+                2,
+                totalLogicalSteps
+            )
+            val toggleRes = httpClient.setParentalControlDeviceState(
+                deviceName = deviceName,
+                enableRule = enableRule
+            )
+            if (!toggleRes.success) {
+                failedStepTitle = "Parental Control Toggle ($deviceName)"
+                failureReason = toggleRes.message + "\n" + httpClient.stepLogs.joinToString("\n")
+                failureCategory = (toggleRes.failureType ?: ZteRouterHttpClient.FailureType.DEVICE_CONTROL_ERROR).name
+                suggestedAction = "Login succeeded! Check the debug request log in Execution History or capture the Parental Control toggle POST in Chrome's Network tab."
+                stepDetails.add(
+                    StepExecutionDetail(
+                        stepOrder = 2,
+                        stepTitle = failedStepTitle,
+                        actionType = ActionType.SET_INDEXED_RADIO,
+                        status = StepStatus.FAILED,
+                        startedAt = step2Start,
+                        finishedAt = System.currentTimeMillis(),
+                        expectedElement = deviceName,
+                        elementFound = false,
+                        actionAttempted = true,
+                        actionConfirmed = false,
+                        failureReason = failureReason,
+                        suggestedAction = suggestedAction,
+                        message = failureReason
+                    )
+                )
+                if (SafeModeManager.isTtsEnabled(context)) {
+                    TextToSpeechManager.speak(toggleRes.message)
+                }
+            } else {
+                completedCount++
+                isOverallSuccess = true
+                stepDetails.add(
+                    StepExecutionDetail(
+                        stepOrder = 2,
+                        stepTitle = "Parental Control Toggle ($deviceName)",
+                        actionType = ActionType.SET_INDEXED_RADIO,
+                        status = StepStatus.SUCCESS,
+                        startedAt = step2Start,
+                        finishedAt = System.currentTimeMillis(),
+                        expectedElement = deviceName,
+                        elementFound = true,
+                        actionAttempted = true,
+                        actionConfirmed = true,
+                        message = toggleRes.message + "\n" + httpClient.stepLogs.joinToString("\n")
+                    )
+                )
+            }
+        } finally {
+            // Step 4: Always log out at the end of the macro so the router's single admin session is released
+            val logoutStart = System.currentTimeMillis()
+            val loggedOut = try {
+                client?.logout() ?: false
+            } catch (_: Exception) {
+                false
+            }
+            if (isOverallSuccess) completedCount++
+            stepDetails.add(
+                StepExecutionDetail(
+                    stepOrder = 3,
+                    stepTitle = "Router HTTP Logout",
+                    actionType = ActionType.CLICK_ELEMENT,
+                    status = if (loggedOut) StepStatus.SUCCESS else StepStatus.SKIPPED,
+                    startedAt = logoutStart,
+                    finishedAt = System.currentTimeMillis(),
+                    expectedElement = "IF_LogOff=1",
+                    elementFound = loggedOut,
+                    actionAttempted = true,
+                    actionConfirmed = loggedOut,
+                    message = if (loggedOut) "Router session released cleanly" else "Logout skipped (no active session)"
+                )
+            )
+            AutomationForegroundService.stop(context)
+        }
+
+        recordLogAndFinish(
+            db, context, automation, startTime, isOverallSuccess,
+            completedCount, totalLogicalSteps, failedStepTitle, failureReason,
+            failureCategory, suggestedAction, stepDetails, onComplete
+        )
     }
 }

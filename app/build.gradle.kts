@@ -102,4 +102,7 @@ dependencies {
 
     // JSON parsing for import/export of workflows
     implementation("com.google.code.gson:gson:2.10.1")
+
+    // Direct HTTP client for router macros (OkHttp + persistent CookieJar)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

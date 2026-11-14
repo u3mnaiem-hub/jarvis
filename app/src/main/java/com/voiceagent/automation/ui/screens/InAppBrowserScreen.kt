@@ -54,7 +54,7 @@ private class JarvisWebSnifferBridge {
             AutomationStep(
                 title = "Click Login (LoginId)",
                 description = "Submit router login",
-                actionType = ActionType.CLICK_BY_ID,
+                actionType = ActionType.CLICK_ELEMENT,
                 selectorResourceId = "LoginId",
                 delayAfterMs = 3000L
             )
@@ -69,7 +69,7 @@ private class JarvisWebSnifferBridge {
             AutomationStep(
                 title = "Click Menu: ${label.ifBlank { elementId }}",
                 description = "Click router menu item #$elementId",
-                actionType = ActionType.CLICK_BY_ID,
+                actionType = ActionType.CLICK_ELEMENT,
                 selectorResourceId = elementId,
                 selectorText = label,
                 delayAfterMs = 2000L

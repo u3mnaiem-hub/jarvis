@@ -682,8 +682,7 @@ fun HomeScreen(
                     name = label,
                     nameAr = label,
                     description = "ZTE H188 Hybrid HTTP + Native JS Macro for $deviceName",
-                    triggerPhrases = listOf(label),
-                    targetPackage = "com.android.chrome",
+                    voicePhrases = listOf(label),
                     steps = listOf(
                         com.voiceagent.automation.model.AutomationStep(
                             order = 1,
@@ -741,17 +740,20 @@ fun HomeScreen(
                                     coroutineScope.launch {
                                         try {
                                             val (client, loginRes) = AutomationExecutionEngine.loginToZteRouter(db)
-                                            if (loginRes.success) {
-                                                val devices = client.fetchParentalControlDevices()
-                                                client.logout()
-                                                routerDevices = devices
-                                                routerStatusText = if (devices.isNotEmpty()) {
-                                                    "تم الدخول بنجاح! تم العثور على ${devices.size} قاعدة في Parental Control."
-                                                } else {
-                                                    "تم الدخول للراوتر بنجاح! يمكنك تشغيل أو قفل النت من الأزرار بالأسفل."
+                                            when (loginRes) {
+                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Success -> {
+                                                    val (_, devices) = client.fetchParentalControlDevices()
+                                                    client.logout()
+                                                    routerDevices = devices
+                                                    routerStatusText = if (devices.isNotEmpty()) {
+                                                        "تم الدخول بنجاح! تم العثور على ${devices.size} قاعدة في Parental Control."
+                                                    } else {
+                                                        "تم الدخول للراوتر بنجاح! يمكنك تشغيل أو قفل النت من الأزرار بالأسفل."
+                                                    }
                                                 }
-                                            } else {
-                                                routerStatusText = "نتيجة الفحص: ${loginRes.message}"
+                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Failure -> {
+                                                    routerStatusText = "نتيجة الفحص: ${loginRes.message}"
+                                                }
                                             }
                                         } catch (e: Exception) {
                                             routerStatusText = "خطأ أثناء الفحص: ${e.message}"
@@ -823,15 +825,15 @@ fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "#${dev.rowIndex}: ${dev.deviceName} (${if (dev.isRestrictionEnabled) "مقفل" else "مفتوح"})",
+                                    text = "#${dev.index}: ${dev.name} (${if (dev.currentEnable == "1") "مقفل" else "مفتوح"})",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    TextButton(onClick = { triggerQuickRouterMacro(dev.deviceName, "0") }) {
+                                    TextButton(onClick = { triggerQuickRouterMacro(dev.name, "0") }) {
                                         Text("تشغيل", color = Emerald600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                     }
-                                    TextButton(onClick = { triggerQuickRouterMacro(dev.deviceName, "1") }) {
+                                    TextButton(onClick = { triggerQuickRouterMacro(dev.name, "1") }) {
                                         Text("قفل", color = Red600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }

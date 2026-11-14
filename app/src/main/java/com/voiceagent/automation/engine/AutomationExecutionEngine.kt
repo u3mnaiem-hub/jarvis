@@ -369,7 +369,8 @@ object AutomationExecutionEngine {
             step.cssSelector?.takeIf { it.isNotBlank() }?.let { add(it) }
             addAll(step.candidateCssSelectors.filter { it.isNotBlank() })
             step.selectorResourceId?.takeIf { it.isNotBlank() }?.let { id ->
-                add(if (id.startsWith("#") || id.startsWith(".")) id else "#$id")
+                val cleanId = id.removePrefix("#")
+                add(if (id.startsWith("[") || id.startsWith(".")) id else "[id='$cleanId']")
             }
         }
         val textCandidates = buildList<String> {
@@ -441,7 +442,77 @@ object AutomationExecutionEngine {
                 StepResult(ok, if (ok) null else "Failed to fill password field in WebView", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
             }
 
+            ActionType.SET_INDEXED_RADIO -> {
+                val namePattern = step.indexedNamePattern ?: "[id='instName_ParentCtrl:{index}']"
+                val radioPattern = step.indexedTargetPattern ?: "input[type='radio'][id='Enable:ParentCtrl:{index}']"
+                val deviceName = step.rowContextText?.takeIf { it.isNotBlank() }
+                    ?: step.selectorText?.takeIf { it.isNotBlank() }
+                    ?: lastWaitedElementText
+                    ?: return StepResult(false, "Device name parameter is missing", actionAttempted = false, elementFound = false)
+                val targetVal = step.targetRadioValue ?: "1"
+
+                val indexedRes = webEngine.setIndexedDeviceRadio(
+                    namePattern = namePattern,
+                    radioPattern = radioPattern,
+                    indexStart = step.indexRangeStart,
+                    indexEnd = step.indexRangeEnd,
+                    deviceName = deviceName,
+                    targetValue = targetVal,
+                    timeoutMs = timeoutMs
+                )
+                if (!indexedRes.success) {
+                    val snapPath = webEngine.saveDomSnapshot(step.title)
+                    if (SafeModeManager.isTtsEnabled(context)) {
+                        TextToSpeechManager.speak(indexedRes.message)
+                    }
+                    val snapNote = if (snapPath != null) " [Snapshot: $snapPath]" else ""
+                    return StepResult(
+                        false,
+                        "${indexedRes.message}$snapNote",
+                        elementFound = indexedRes.status != "NOT_FOUND" && indexedRes.status != "TIMEOUT",
+                        actionAttempted = true,
+                        actionConfirmed = false
+                    )
+                }
+                StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+            }
+
             ActionType.CLICK_ELEMENT -> {
+                if (!step.indexedNamePattern.isNullOrBlank() && !step.indexedTargetPattern.isNullOrBlank()) {
+                    val deviceName = step.rowContextText?.takeIf { it.isNotBlank() }
+                        ?: step.selectorText?.takeIf { it.isNotBlank() }
+                        ?: lastWaitedElementText
+                        ?: return StepResult(false, "Device name parameter is missing", actionAttempted = false, elementFound = false)
+                    val wantsOff = textCandidates.any {
+                        it.lowercase() in listOf("0", "off", "block", "disable", "حظر", "تعطيل")
+                    }
+                    val targetVal = step.targetRadioValue ?: if (wantsOff) "0" else "1"
+                    val indexedRes = webEngine.setIndexedDeviceRadio(
+                        namePattern = step.indexedNamePattern,
+                        radioPattern = step.indexedTargetPattern,
+                        indexStart = step.indexRangeStart,
+                        indexEnd = step.indexRangeEnd,
+                        deviceName = deviceName,
+                        targetValue = targetVal,
+                        timeoutMs = timeoutMs
+                    )
+                    if (!indexedRes.success) {
+                        val snapPath = webEngine.saveDomSnapshot(step.title)
+                        if (SafeModeManager.isTtsEnabled(context)) {
+                            TextToSpeechManager.speak(indexedRes.message)
+                        }
+                        val snapNote = if (snapPath != null) " [Snapshot: $snapPath]" else ""
+                        return StepResult(
+                            false,
+                            "${indexedRes.message}$snapNote",
+                            elementFound = indexedRes.status != "NOT_FOUND" && indexedRes.status != "TIMEOUT",
+                            actionAttempted = true,
+                            actionConfirmed = false
+                        )
+                    }
+                    return StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
+                }
+
                 val isLogin = isLoginOrSubmitStep(step)
                 val rowTarget = step.rowContextText?.takeIf { it.isNotBlank() }
                     ?: lastWaitedElementText?.takeIf {
@@ -463,9 +534,27 @@ object AutomationExecutionEngine {
                         return StepResult(false, msg, elementFound = true, actionAttempted = true, actionConfirmed = false)
                     }
                 }
+                if (ok && !step.waitAfterNavigationSelector.isNullOrBlank()) {
+                    val nextReady = webEngine.waitForElement(
+                        listOf(step.waitAfterNavigationSelector),
+                        emptyList(),
+                        timeoutMs
+                    )
+                    if (!nextReady) {
+                        val snapPath = webEngine.saveDomSnapshot(step.title)
+                        val msg = "Clicked '${step.title}', but next element '${step.waitAfterNavigationSelector}' did not appear within ${timeoutMs / 1000}s.${if (snapPath != null) " [Snapshot: $snapPath]" else ""}"
+                        if (SafeModeManager.isTtsEnabled(context)) TextToSpeechManager.speak("Page timed out waiting for next element")
+                        return StepResult(false, msg, elementFound = true, actionAttempted = true, actionConfirmed = false)
+                    }
+                }
                 if (!ok) {
+                    val snapPath = webEngine.saveDomSnapshot(step.title)
                     val dump = if (webEngine.debugMode) "\n[WebDebug] Elements: ${webEngine.dumpInteractiveElements()}" else ""
-                    return StepResult(false, "Could not click web element '${textCandidates.firstOrNull() ?: cssSelectors.firstOrNull()}'.$dump", elementFound = false, actionAttempted = true, actionConfirmed = false)
+                    val snapNote = if (snapPath != null) " [Snapshot: $snapPath]" else ""
+                    if (SafeModeManager.isTtsEnabled(context)) {
+                        TextToSpeechManager.speak(if (isLogin) "Login button not found" else "Element not found: ${step.title}")
+                    }
+                    return StepResult(false, "Could not click web element '${textCandidates.firstOrNull() ?: cssSelectors.firstOrNull()}'.$snapNote$dump", elementFound = false, actionAttempted = true, actionConfirmed = false)
                 }
                 StepResult(true, elementFound = true, actionAttempted = true, actionConfirmed = true)
             }
@@ -491,6 +580,7 @@ object AutomationExecutionEngine {
                 ActionType.OPEN_URL,
                 ActionType.WAIT_FOR_ELEMENT,
                 ActionType.CLICK_ELEMENT,
+                ActionType.SET_INDEXED_RADIO,
                 ActionType.SET_TEXT,
                 ActionType.INJECT_CREDENTIAL,
                 ActionType.PRESS_ENTER

@@ -257,6 +257,14 @@ fun WorkflowEditorScreen(
                     StepItemCard(
                         step = step,
                         index = index,
+                        onTestStep = {
+                            val singleStepAuto = Automation(
+                                name = "Test Step ${index + 1}: ${step.title}",
+                                steps = listOf(step.copy(order = 1))
+                            )
+                            Toast.makeText(context, "Testing step ${index + 1}: ${step.title}", Toast.LENGTH_SHORT).show()
+                            AutomationExecutionEngine.executeAutomation(context, singleStepAuto)
+                        },
                         onEdit = {
                             editingStepIndex = index
                             currentEditingStep = step
@@ -328,6 +336,7 @@ fun WorkflowEditorScreen(
 fun StepItemCard(
     step: AutomationStep,
     index: Int,
+    onTestStep: () -> Unit = {},
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit = {},
@@ -403,7 +412,17 @@ fun StepItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = onTestStep,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = "Test Step", modifier = Modifier.size(14.dp), tint = Emerald600)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("Test Step", fontSize = 10.5.sp, color = Emerald600, fontWeight = FontWeight.Bold)
+                    }
                     if (step.delayAfterMs > 0) {
                         Text("⏳ ${step.delayAfterMs}ms", fontSize = 10.5.sp, color = LightTextSecondary)
                     }

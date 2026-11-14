@@ -22,7 +22,17 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import kotlin.coroutines.resume
+
+data class IndexedRadioResult(
+    val success: Boolean,
+    val status: String, // "SUCCESS", "NOT_FOUND", "MULTIPLE_MATCHES", "RADIO_NOT_FOUND", "VERIFY_FAILED", "TIMEOUT"
+    val matchedIndex: Int = -1,
+    val matchedDeviceName: String = "",
+    val message: String = "",
+    val allDevicesDump: String = ""
+)
 
 /**
  * Dedicated WebView + JavaScript execution engine for WebMacro workflows (e.g. ZTE H188 WE router).
@@ -220,18 +230,17 @@ class WebMacroEngine(private val context: Context) {
                 }
                 try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
                 var docWin = (el.ownerDocument && el.ownerDocument.defaultView) ? el.ownerDocument.defaultView : window;
-                var tag = (el.tagName || '').toUpperCase();
-                if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'A') {
-                    try { el.click(); return true; } catch (e) {}
-                }
                 var events = ['mousedown', 'mouseup', 'click'];
                 for (var i = 0; i < events.length; i++) {
-                    el.dispatchEvent(new docWin.MouseEvent(events[i], {
-                        view: docWin,
-                        bubbles: true,
-                        cancelable: true
-                    }));
+                    try {
+                        el.dispatchEvent(new docWin.MouseEvent(events[i], {
+                            view: docWin,
+                            bubbles: true,
+                            cancelable: true
+                        }));
+                    } catch (e) {}
                 }
+                try { el.click(); } catch (e) {}
                 return true;
             })();
         """.trimIndent()
@@ -332,7 +341,7 @@ class WebMacroEngine(private val context: Context) {
             (function() {
                 function trySubmit(doc) {
                     if (!doc) return false;
-                    var pwd = doc.querySelector('input[type="password"], #Frm_Password');
+                    var pwd = doc.getElementById('Frm_Password') || doc.querySelector("input[id='Frm_Password'], input[type='password']");
                     if (pwd) {
                         pwd.focus();
                         ['keydown', 'keypress', 'keyup'].forEach(function(type) {
@@ -340,6 +349,10 @@ class WebMacroEngine(private val context: Context) {
                                 key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
                             }));
                         });
+                        var loginEl = doc.getElementById('LoginId') || doc.querySelector("[id='LoginId']");
+                        if (loginEl) {
+                            try { loginEl.click(); return true; } catch (e) {}
+                        }
                         if (pwd.form) {
                             try { pwd.form.submit(); return true; } catch (e) {}
                         }
@@ -361,6 +374,329 @@ class WebMacroEngine(private val context: Context) {
             })();
         """.trimIndent()
         return evalJs(js) == "true"
+    }
+
+    /**
+     * Data-driven indexed device lookup and immediate-save radio setter (e.g. ZTE H188 WE Parental Control).
+     * 1. Waits until index 0 (e.g. [id='instName_ParentCtrl:0']) has non-empty text.
+     * 2. Scans indexStart..indexEnd, matches deviceName (case-insensitive, trimmed, partial match allowed).
+     * 3. Fails if 0 matches or >1 matches (never guesses a device).
+     * 4. Clicks the radio matching targetValue ("1" = on, "0" = off) and dispatches click + change events.
+     * 5. Waits 1.5s, re-reads radio state to verify; retries once if reverted.
+     */
+    suspend fun setIndexedDeviceRadio(
+        namePattern: String,
+        radioPattern: String,
+        indexStart: Int,
+        indexEnd: Int,
+        deviceName: String,
+        targetValue: String,
+        timeoutMs: Long = 12000L
+    ): IndexedRadioResult {
+        val firstNameSelector = namePattern.replace("{index}", indexStart.toString())
+        val firstWaitStart = System.currentTimeMillis()
+        var firstNonEmptyReady = false
+
+        while (System.currentTimeMillis() - firstWaitStart < timeoutMs) {
+            val checkFirstJs = """
+                (function() {
+                    ${FINDER_HELPER_JS}
+                    function hasNonEmptyText(doc) {
+                        if (!doc) return false;
+                        var list = queryAllSafe(doc, ${JSONObject.quote(firstNameSelector)});
+                        for (var i = 0; i < list.length; i++) {
+                            var txt = (list[i].innerText || list[i].textContent || list[i].value || '').trim();
+                            if (txt.length > 0) return true;
+                        }
+                        var frames = doc.querySelectorAll('iframe, frame');
+                        for (var f = 0; f < frames.length; f++) {
+                            try {
+                                var fDoc = frames[f].contentDocument || frames[f].contentWindow.document;
+                                if (hasNonEmptyText(fDoc)) return true;
+                            } catch (e) {}
+                        }
+                        return false;
+                    }
+                    return hasNonEmptyText(document);
+                })();
+            """.trimIndent()
+            if (evalJs(checkFirstJs) == "true") {
+                firstNonEmptyReady = true
+                break
+            }
+            delay(300)
+        }
+
+        if (!firstNonEmptyReady) {
+            return IndexedRadioResult(
+                success = false,
+                status = "TIMEOUT",
+                message = "Parental Control device list ($firstNameSelector) did not load non-empty text within ${timeoutMs / 1000}s"
+            )
+        }
+
+        val namePatJson = JSONObject.quote(namePattern)
+        val radioPatJson = JSONObject.quote(radioPattern)
+        val deviceQueryJson = JSONObject.quote(deviceName.trim())
+        val targetValJson = JSONObject.quote(targetValue.trim())
+
+        suspend fun scanAndClickJs(): JSONObject {
+            val js = """
+                (function() {
+                    ${FINDER_HELPER_JS}
+                    var namePat = $namePatJson;
+                    var radioPat = $radioPatJson;
+                    var needle = $deviceQueryJson.toLowerCase();
+                    var targetVal = $targetValJson;
+                    var foundDevices = [];
+                    var exactMatches = [];
+                    var partialMatches = [];
+
+                    function findInDocs(sel) {
+                        var results = [];
+                        function walk(doc) {
+                            if (!doc) return;
+                            var nodes = queryAllSafe(doc, sel);
+                            for (var i = 0; i < nodes.length; i++) results.push(nodes[i]);
+                            var frames = doc.querySelectorAll('iframe, frame');
+                            for (var f = 0; f < frames.length; f++) {
+                                try {
+                                    var fDoc = frames[f].contentDocument || frames[f].contentWindow.document;
+                                    walk(fDoc);
+                                } catch (e) {}
+                            }
+                        }
+                        walk(document);
+                        return results;
+                    }
+
+                    for (var idx = $indexStart; idx <= $indexEnd; idx++) {
+                        var sel = namePat.replace('{index}', '' + idx);
+                        var els = findInDocs(sel);
+                        for (var e = 0; e < els.length; e++) {
+                            var rawName = (els[e].innerText || els[e].textContent || els[e].value || '').trim();
+                            if (!rawName) continue;
+                            foundDevices.push(idx + ':' + rawName);
+                            var lowerName = rawName.toLowerCase();
+                            if (lowerName === needle) {
+                                exactMatches.push({ index: idx, name: rawName, el: els[e] });
+                            } else if (lowerName.indexOf(needle) !== -1 || needle.indexOf(lowerName) !== -1) {
+                                partialMatches.push({ index: idx, name: rawName, el: els[e] });
+                            }
+                            break;
+                        }
+                    }
+
+                    var matches = exactMatches.length > 0 ? exactMatches : partialMatches;
+                    if (matches.length === 0) {
+                        return JSON.stringify({
+                            status: 'NOT_FOUND',
+                            devices: foundDevices.join(', ')
+                        });
+                    }
+                    if (matches.length > 1) {
+                        var names = matches.map(function(m) { return m.name + ' (index ' + m.index + ')'; }).join(', ');
+                        return JSON.stringify({
+                            status: 'MULTIPLE_MATCHES',
+                            matchedNames: names,
+                            devices: foundDevices.join(', ')
+                        });
+                    }
+
+                    var chosen = matches[0];
+                    var rSel = radioPat.replace('{index}', '' + chosen.index);
+                    var radios = findInDocs(rSel);
+
+                    // Also search row container if multiple radios share name or row
+                    if (radios.length < 2 && chosen.el) {
+                        var row = chosen.el.closest ? (chosen.el.closest('tr, .row, div[id*="ParentCtrl"], form') || chosen.el.parentElement) : chosen.el.parentElement;
+                        if (row) {
+                            var rowRadios = row.querySelectorAll("input[type='radio']");
+                            for (var rr = 0; rr < rowRadios.length; rr++) {
+                                if (radios.indexOf(rowRadios[rr]) === -1) radios.push(rowRadios[rr]);
+                            }
+                        }
+                    }
+
+                    var targetRadio = null;
+                    for (var r = 0; r < radios.length; r++) {
+                        if (String(radios[r].value) === targetVal) {
+                            targetRadio = radios[r];
+                            break;
+                        }
+                    }
+                    if (!targetRadio && radios.length >= 2) {
+                        targetRadio = (targetVal === '1') ? radios[0] : radios[1];
+                    } else if (!targetRadio && radios.length === 1) {
+                        targetRadio = radios[0];
+                    }
+
+                    if (!targetRadio) {
+                        return JSON.stringify({
+                            status: 'RADIO_NOT_FOUND',
+                            matchedIndex: chosen.index,
+                            matchedName: chosen.name,
+                            devices: foundDevices.join(', ')
+                        });
+                    }
+
+                    var docWin = (targetRadio.ownerDocument && targetRadio.ownerDocument.defaultView) ? targetRadio.ownerDocument.defaultView : window;
+                    try { targetRadio.scrollIntoView({ block: 'center' }); } catch (e) {}
+                    targetRadio.checked = true;
+                    ['mousedown', 'mouseup', 'click'].forEach(function(ev) {
+                        try {
+                            targetRadio.dispatchEvent(new docWin.MouseEvent(ev, { view: docWin, bubbles: true, cancelable: true }));
+                        } catch (e) {}
+                    });
+                    try { targetRadio.click(); } catch (e) {}
+                    try { targetRadio.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+
+                    return JSON.stringify({
+                        status: 'CLICKED',
+                        matchedIndex: chosen.index,
+                        matchedName: chosen.name,
+                        devices: foundDevices.join(', ')
+                    });
+                })();
+            """.trimIndent()
+            val raw = evalJs(js) ?: "{}"
+            val unquoted = if (raw.startsWith("\"") && raw.endsWith("\"")) {
+                org.json.JSONTokener(raw).nextValue().toString()
+            } else raw
+            return try {
+                JSONObject(unquoted)
+            } catch (_: Exception) {
+                JSONObject()
+            }
+        }
+
+        suspend fun verifyRadioState(matchedIndex: Int): Boolean {
+            val rSel = radioPattern.replace("{index}", matchedIndex.toString())
+            val js = """
+                (function() {
+                    ${FINDER_HELPER_JS}
+                    var rSel = ${JSONObject.quote(rSel)};
+                    var targetVal = $targetValJson;
+                    function checkDoc(doc) {
+                        if (!doc) return null;
+                        var errEl = doc.querySelector('.error, #errMsg, [id*="Error"][style*="block"]');
+                        if (errEl && isElementVisible(errEl) && (errEl.innerText || '').trim().length > 0) {
+                            return false;
+                        }
+                        var radios = queryAllSafe(doc, rSel);
+                        for (var i = 0; i < radios.length; i++) {
+                            if (String(radios[i].value) === targetVal) {
+                                return !!radios[i].checked;
+                            }
+                        }
+                        if (radios.length === 1) return !!radios[0].checked;
+                        var frames = doc.querySelectorAll('iframe, frame');
+                        for (var f = 0; f < frames.length; f++) {
+                            try {
+                                var fDoc = frames[f].contentDocument || frames[f].contentWindow.document;
+                                var res = checkDoc(fDoc);
+                                if (res !== null) return res;
+                            } catch (e) {}
+                        }
+                        return null;
+                    }
+                    return checkDoc(document) === true;
+                })();
+            """.trimIndent()
+            return evalJs(js) == "true"
+        }
+
+        var attemptResult = scanAndClickJs()
+        val status = attemptResult.optString("status", "ERROR")
+        val devicesDump = attemptResult.optString("devices", "")
+
+        when (status) {
+            "NOT_FOUND" -> return IndexedRadioResult(
+                success = false,
+                status = "NOT_FOUND",
+                message = "Device '$deviceName' not found in Parental Control list. Available devices: $devicesDump",
+                allDevicesDump = devicesDump
+            )
+            "MULTIPLE_MATCHES" -> {
+                val matchedNames = attemptResult.optString("matchedNames", "")
+                return IndexedRadioResult(
+                    success = false,
+                    status = "MULTIPLE_MATCHES",
+                    message = "Multiple devices matched '$deviceName': $matchedNames. Stopping without guessing.",
+                    allDevicesDump = devicesDump
+                )
+            }
+            "RADIO_NOT_FOUND" -> {
+                val idx = attemptResult.optInt("matchedIndex", -1)
+                val name = attemptResult.optString("matchedName", deviceName)
+                return IndexedRadioResult(
+                    success = false,
+                    status = "RADIO_NOT_FOUND",
+                    matchedIndex = idx,
+                    matchedDeviceName = name,
+                    message = "Matched '$name' at index $idx, but radio button for value '$targetValue' was not found.",
+                    allDevicesDump = devicesDump
+                )
+            }
+            "CLICKED" -> {
+                val idx = attemptResult.optInt("matchedIndex", -1)
+                val name = attemptResult.optString("matchedName", deviceName)
+                delay(1500)
+                if (verifyRadioState(idx)) {
+                    return IndexedRadioResult(
+                        success = true,
+                        status = "SUCCESS",
+                        matchedIndex = idx,
+                        matchedDeviceName = name,
+                        message = "Device '$name' (index $idx) set to value '$targetValue' and verified.",
+                        allDevicesDump = devicesDump
+                    )
+                }
+                // Retry once as required by spec
+                Log.w(TAG, "Radio verification failed on first attempt for '$name' (index $idx); retrying once...")
+                attemptResult = scanAndClickJs()
+                delay(1500)
+                if (verifyRadioState(idx)) {
+                    return IndexedRadioResult(
+                        success = true,
+                        status = "SUCCESS",
+                        matchedIndex = idx,
+                        matchedDeviceName = name,
+                        message = "Device '$name' (index $idx) set to value '$targetValue' and verified after 1 retry.",
+                        allDevicesDump = devicesDump
+                    )
+                }
+                return IndexedRadioResult(
+                    success = false,
+                    status = "VERIFY_FAILED",
+                    matchedIndex = idx,
+                    matchedDeviceName = name,
+                    message = "Radio state for '$name' (index $idx) reverted or failed verification after retry.",
+                    allDevicesDump = devicesDump
+                )
+            }
+            else -> return IndexedRadioResult(
+                success = false,
+                status = status,
+                message = "Unexpected error setting radio for '$deviceName'",
+                allDevicesDump = devicesDump
+            )
+        }
+    }
+
+    suspend fun saveDomSnapshot(stepTitle: String): String? {
+        return try {
+            val dump = dumpInteractiveElements()
+            val dir = File(context.getExternalFilesDir(null) ?: context.filesDir, "debug_snapshots")
+            if (!dir.exists()) dir.mkdirs()
+            val safeName = stepTitle.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            val file = File(dir, "snapshot_${System.currentTimeMillis()}_$safeName.txt")
+            file.writeText("Step: $stepTitle\nTimestamp: ${System.currentTimeMillis()}\nInteractive Elements:\n$dump\n")
+            file.absolutePath
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save DOM snapshot: ${e.message}")
+            null
+        }
     }
 
     suspend fun dumpInteractiveElements(): String {
@@ -489,17 +825,43 @@ class WebMacroEngine(private val context: Context) {
                 return null;
             }
 
+            function queryAllSafe(doc, sel) {
+                if (!doc || !sel) return [];
+                var out = [];
+                try {
+                    // Never use raw '#id' when IDs may contain ':' (e.g. instName_ParentCtrl:0)
+                    if (sel.charAt(0) === '#' && sel.indexOf(' ') === -1 && sel.indexOf('>') === -1) {
+                        var rawId = sel.slice(1);
+                        var byId = doc.getElementById(rawId);
+                        if (byId) out.push(byId);
+                        var byAttr = doc.querySelectorAll("[id='" + rawId.replace(/'/g, "\\'") + "']");
+                        for (var a = 0; a < byAttr.length; a++) {
+                            if (out.indexOf(byAttr[a]) === -1) out.push(byAttr[a]);
+                        }
+                        return out;
+                    }
+                    var idMatch = sel.match(/^\[id=['"]([^'"]+)['"]\]$/);
+                    if (idMatch) {
+                        var exactEl = doc.getElementById(idMatch[1]);
+                        if (exactEl) out.push(exactEl);
+                    }
+                    var list = doc.querySelectorAll(sel);
+                    for (var i = 0; i < list.length; i++) {
+                        if (out.indexOf(list[i]) === -1) out.push(list[i]);
+                    }
+                } catch (e) {}
+                return out;
+            }
+
             function findElementInFrames(doc, cssList, textList, preferInput) {
                 if (!doc) return null;
                 for (var i = 0; i < cssList.length; i++) {
                     var sel = cssList[i];
                     if (!sel) continue;
-                    try {
-                        var allCss = doc.querySelectorAll(sel);
-                        for (var v = 0; v < allCss.length; v++) {
-                            if (isElementVisible(allCss[v])) return allCss[v];
-                        }
-                    } catch (e) {}
+                    var allCss = queryAllSafe(doc, sel);
+                    for (var v = 0; v < allCss.length; v++) {
+                        if (isElementVisible(allCss[v])) return allCss[v];
+                    }
                 }
                 if (textList && textList.length > 0) {
                     if (preferInput) {

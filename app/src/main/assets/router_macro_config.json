@@ -1,0 +1,15 @@
+{
+  "url": "http://192.168.1.1",
+  "username_field": "[id='Frm_Username']",
+  "password_field": "[id='Frm_Password']",
+  "login_button": "[id='LoginId']",
+  "internet_tab": "[id='mmInternet']",
+  "parental_control_item": "[id='smParentCtrl']",
+  "device_name_pattern": "[id='instName_ParentCtrl:{index}']",
+  "device_radio_pattern": "input[type='radio'][id='Enable:ParentCtrl:{index}']",
+  "device_index_range": [0, 10],
+  "radio_values": {
+    "on": "1",
+    "off": "0"
+  }
+}

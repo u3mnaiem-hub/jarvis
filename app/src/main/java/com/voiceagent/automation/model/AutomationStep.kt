@@ -29,6 +29,14 @@ data class AutomationStep(
     val cssSelector: String? = null,
     val candidateCssSelectors: List<String> = emptyList(),
     val rowContextText: String? = null,
+    val waitAfterNavigationSelector: String? = null,
+
+    // Configurable indexed pattern selectors (e.g. ZTE H188 Parental Control 0..10)
+    val indexedNamePattern: String? = null,
+    val indexedTargetPattern: String? = null,
+    val indexRangeStart: Int = 0,
+    val indexRangeEnd: Int = 10,
+    val targetRadioValue: String? = null,
     
     // Semantic / Multi-text candidate matching (e.g. ["Login", "Log in", "تسجيل الدخول", "دخول"])
     val candidateTexts: List<String> = emptyList(),

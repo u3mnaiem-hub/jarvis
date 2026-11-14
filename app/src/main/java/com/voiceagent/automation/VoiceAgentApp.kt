@@ -25,11 +25,15 @@ class VoiceAgentApp : Application() {
             try {
                 val db = VoiceAgentDatabase.getInstance(this@VoiceAgentApp)
                 val existingEnable = db.automationDao().getAutomationById("demo_enable_tv_internet")
-                if (existingEnable == null || existingEnable.steps.none { it.isWebStep }) {
-                    val enableTvWorkflow = DemoWorkflows.createEnableTvInternetWorkflow()
-                    val disableTvWorkflow = DemoWorkflows.createDisableTvInternetWorkflow()
+                if (existingEnable == null || existingEnable.steps.none { it.actionType == com.voiceagent.automation.model.ActionType.SET_INDEXED_RADIO }) {
+                    val customDevice = existingEnable?.steps
+                        ?.firstOrNull { !it.rowContextText.isNullOrBlank() }
+                        ?.rowContextText
+                        ?: "Smart-TV"
+                    val enableTvWorkflow = DemoWorkflows.createEnableTvInternetWorkflow(deviceName = customDevice)
+                    val disableTvWorkflow = DemoWorkflows.createDisableTvInternetWorkflow(deviceName = customDevice)
                     db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow))
-                    Log.i("VoiceAgentApp", "Seeded/upgraded WebMacro demo workflows: Enable & Disable TV Internet")
+                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows for device: $customDevice")
                 }
 
                 // Check router credential seed

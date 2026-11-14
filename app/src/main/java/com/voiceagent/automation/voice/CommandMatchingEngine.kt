@@ -23,6 +23,31 @@ object CommandMatchingEngine {
 
         val normalizedInput = normalizeText(spokenText)
 
+        // 0. Parameterized template phrase match (e.g. "Jarvis block <device_name>", "اقفل النت عن <device_name>")
+        for (automation in availableAutomations) {
+            for (phrase in automation.voicePhrases) {
+                if (phrase.contains("{device_name}")) {
+                    val prefix = normalizeText(phrase.substringBefore("{device_name}"))
+                    if (prefix.isNotBlank() && normalizedInput.startsWith(prefix)) {
+                        val extractedParam = spokenText.trim()
+                            .replaceFirst(Regex("(?i)^jarvis[,\\s]*"), "")
+                            .let { raw ->
+                                val rawPrefix = phrase.substringBefore("{device_name}").replace(Regex("(?i)^jarvis[,\\s]*"), "").trim()
+                                if (raw.lowercase().startsWith(rawPrefix.lowercase())) {
+                                    raw.substring(rawPrefix.length).trim()
+                                } else {
+                                    normalizedInput.removePrefix(prefix).trim()
+                                }
+                            }
+                        if (extractedParam.isNotBlank()) {
+                            val boundAutomation = bindDeviceParameter(automation, extractedParam)
+                            return MatchResult.ExactMatch(boundAutomation)
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. Exact phrase match
         for (automation in availableAutomations) {
             val allPhrases = automation.voicePhrases + listOf(automation.name, automation.nameAr)
@@ -86,6 +111,25 @@ object CommandMatchingEngine {
         } else {
             MatchResult.NoMatch
         }
+    }
+
+    private fun bindDeviceParameter(automation: Automation, deviceName: String): Automation {
+        val updatedSteps = automation.steps.map { step ->
+            if (!step.indexedNamePattern.isNullOrBlank() || !step.rowContextText.isNullOrBlank()) {
+                step.copy(
+                    rowContextText = deviceName,
+                    selectorText = deviceName,
+                    title = step.title.replace(step.rowContextText ?: "", deviceName),
+                    spokenMessage = step.spokenMessage?.replace(step.rowContextText ?: "", deviceName)
+                )
+            } else {
+                step
+            }
+        }
+        return automation.copy(
+            name = "${automation.name} ($deviceName)",
+            steps = updatedSteps
+        )
     }
 
     /**

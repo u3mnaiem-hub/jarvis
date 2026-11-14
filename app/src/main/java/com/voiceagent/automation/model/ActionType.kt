@@ -22,7 +22,8 @@ enum class ActionType(val labelEn: String, val labelAr: String) {
     SPEAK_TEXT("Speak Spoken Message", "نطق رسالة صوتية"),
     SHOW_NOTIFICATION("Show Notification", "إظهار إشعار"),
     ASK_CONFIRMATION("Ask User Confirmation", "طلب تأكيد المستخدم"),
-    RUN_WORKFLOW("Run Sub-Workflow", "تشغيل مهمة فرعية")
+    RUN_WORKFLOW("Run Sub-Workflow", "تشغيل مهمة فرعية"),
+    SET_INDEXED_RADIO("Set Indexed Device Radio", "ضبط خيار الجهاز بالاسم")
 }
 
 enum class StepStatus {

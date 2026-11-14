@@ -378,6 +378,7 @@ class ZteRouterHttpClient(
                 .post(formBody)
                 .build()
 
+            var shouldContinue = false
             try {
                 client.newCall(postReq).execute().use { response ->
                     val code = response.code
@@ -393,7 +394,8 @@ class ZteRouterHttpClient(
                             "Login POST returned HTTP $code",
                             code
                         )
-                        continue
+                        shouldContinue = true
+                        return@use
                     }
 
                     if (isAuthenticatedHtml(respHtml)) {
@@ -447,6 +449,9 @@ class ZteRouterHttpClient(
                     FailureType.NETWORK_OR_CERTIFICATE_ERROR,
                     "Network error during login POST: ${e.message}"
                 )
+            }
+            if (shouldContinue) {
+                continue
             }
         }
 

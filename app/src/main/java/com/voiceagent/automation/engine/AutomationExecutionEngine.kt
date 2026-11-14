@@ -1251,7 +1251,7 @@ object AutomationExecutionEngine {
                 "Router password not found in secure Credential Vault (key '$credentialKey'). Please save your router password in Credentials first."
             )
         val plainPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
-        db.credentialDao().updateLastUsed(cred.keyName, System.currentTimeMillis())
+        db.credentialDao().updateLastUsed(cred.key, System.currentTimeMillis())
         val loginRes = client.login(plainPassword = plainPassword, username = username)
         return client to loginRes
     }

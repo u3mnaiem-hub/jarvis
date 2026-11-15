@@ -35,38 +35,46 @@ import org.json.JSONObject
 private class JarvisWebSnifferBridge(private val appContext: android.content.Context) {
     @JavascriptInterface
     fun onRouterLoginSubmitted(username: String, password: String) {
-        val cleanUser = username.trim().ifBlank { "admin" }
+        val prefs = appContext.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE)
+        val storedUser = prefs.getString("router_admin_user", null)
+        val cleanUser = storedUser?.takeIf { it.isNotBlank() } ?: username.trim().ifBlank { "admin" }
         if (password.isNotBlank()) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val prefs = appContext.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE)
-                    prefs.edit().putString("router_admin_user", cleanUser).apply()
-                    val enc = KeystoreManager.encrypt(password)
                     val db = VoiceAgentDatabase.getInstance(appContext)
-                    db.credentialDao().insertOrUpdate(
-                        Credential(
-                            key = "router_admin_pass",
-                            label = "ZTE Router Admin Password",
-                            encryptedData = enc.encryptedBase64,
-                            iv = enc.ivBase64
+                    val existingCred = db.credentialDao().getCredentialByKey("router_admin_pass")
+                    // Only save if no router password is stored in Credentials yet, so system-stored
+                    // credentials always take priority and are never overwritten by browser typing!
+                    if (existingCred == null) {
+                        prefs.edit().putString("router_admin_user", cleanUser).apply()
+                        val enc = KeystoreManager.encrypt(password)
+                        db.credentialDao().insertOrUpdate(
+                            Credential(
+                                key = "router_admin_pass",
+                                label = "ZTE Router Admin Password",
+                                encryptedData = enc.encryptedBase64,
+                                iv = enc.ivBase64
+                            )
                         )
-                    )
-                    db.credentialDao().insertOrUpdate(
-                        Credential(
-                            key = "router_password",
-                            label = "Router Password",
-                            encryptedData = enc.encryptedBase64,
-                            iv = enc.ivBase64
+                        db.credentialDao().insertOrUpdate(
+                            Credential(
+                                key = "router_password",
+                                label = "Router Password",
+                                encryptedData = enc.encryptedBase64,
+                                iv = enc.ivBase64
+                            )
                         )
-                    )
-                    Log.i("JarvisWebSniffer", "Auto-saved router credentials to Keystore vault for user=$cleanUser")
+                        Log.i("JarvisWebSniffer", "Saved initial router credentials to Keystore vault for user=$cleanUser")
+                    } else {
+                        Log.i("JarvisWebSniffer", "Using existing system-stored Credentials (router_admin_pass) without overwriting")
+                    }
                 } catch (e: Exception) {
-                    Log.w("JarvisWebSniffer", "Failed to auto-save router credentials: ${e.message}")
+                    Log.w("JarvisWebSniffer", "Failed checking router credentials: ${e.message}")
                 }
             }
         }
         if (!AutomationRecorderEngine.isRecordingActive) return
-        Log.i("JarvisWebSniffer", "Captured router login for user=$cleanUser")
+        Log.i("JarvisWebSniffer", "Captured router login referencing system credential router_admin_pass for user=$cleanUser")
         AutomationRecorderEngine.addRecordedStep(
             AutomationStep(
                 title = "Type Admin Username ($cleanUser)",
@@ -414,6 +422,41 @@ fun InAppBrowserScreen(
                                 isLoading = false
                                 canGoBack = view?.canGoBack() ?: false
                                 url?.let { recordUrlIfActive(it) }
+                                // Automatically pre-fill Frm_Username and Frm_Password from system-stored Credentials
+                                // when the router login page loads, so the user never needs to type them manually
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val db = VoiceAgentDatabase.getInstance(localContext)
+                                        val cred = db.credentialDao().getCredentialByKey("router_admin_pass")
+                                            ?: db.credentialDao().getCredentialByKey("router_password")
+                                        val prefs = localContext.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE)
+                                        val savedUser = prefs.getString("router_admin_user", "admin") ?: "admin"
+                                        if (cred != null) {
+                                            val plainPass = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
+                                            val uQuote = JSONObject.quote(savedUser)
+                                            val pQuote = JSONObject.quote(plainPass)
+                                            launch(Dispatchers.Main) {
+                                                view?.evaluateJavascript(
+                                                    """
+                                                    (function() {
+                                                        var u = document.getElementById('Frm_Username');
+                                                        var p = document.getElementById('Frm_Password');
+                                                        if (u && p) {
+                                                            u.value = $uQuote;
+                                                            u.dispatchEvent(new Event('input', { bubbles: true }));
+                                                            u.dispatchEvent(new Event('change', { bubbles: true }));
+                                                            p.value = $pQuote;
+                                                            p.dispatchEvent(new Event('input', { bubbles: true }));
+                                                            p.dispatchEvent(new Event('change', { bubbles: true }));
+                                                        }
+                                                    })();
+                                                    """.trimIndent(),
+                                                    null
+                                                )
+                                            }
+                                        }
+                                    } catch (_: Exception) {}
+                                }
                                 // Inject ZTE Router & DOM Sniffer hook so recording in the built-in browser
                                 // captures deterministic HTTP/JS actions without relying on screen coordinates
                                 view?.evaluateJavascript(

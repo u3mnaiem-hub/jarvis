@@ -462,8 +462,12 @@ class WebMacroEngine(private val context: Context) {
                     var needle = $deviceQueryJson.toLowerCase();
                     var targetVal = $targetValJson;
                     var foundDevices = [];
+                    var foundObjs = [];
+                    var indexMatches = [];
                     var exactMatches = [];
                     var partialMatches = [];
+                    var tvMatches = [];
+                    var tvKw = ['tv', 'toshiba', 'sharp', 'lg', 'samsung', 'sony', 'tcl', 'شاشة', 'تلفزيون'];
 
                     function findInDocs(sel) {
                         var results = [];
@@ -490,35 +494,48 @@ class WebMacroEngine(private val context: Context) {
                             var rawName = (els[e].innerText || els[e].textContent || els[e].value || '').trim();
                             if (!rawName) continue;
                             foundDevices.push(idx + ':' + rawName);
+                            var obj = { index: idx, name: rawName, el: els[e] };
+                            foundObjs.push(obj);
                             var lowerName = rawName.toLowerCase();
-                            if (lowerName === needle) {
-                                exactMatches.push({ index: idx, name: rawName, el: els[e] });
+                            if (String(idx) === needle) {
+                                indexMatches.push(obj);
+                            } else if (lowerName === needle) {
+                                exactMatches.push(obj);
                             } else if (lowerName.indexOf(needle) !== -1 || needle.indexOf(lowerName) !== -1) {
-                                partialMatches.push({ index: idx, name: rawName, el: els[e] });
+                                partialMatches.push(obj);
+                            }
+                            for (var k = 0; k < tvKw.length; k++) {
+                                if (lowerName.indexOf(tvKw[k]) !== -1) {
+                                    tvMatches.push(obj);
+                                    break;
+                                }
                             }
                             break;
                         }
                     }
 
-                    var matches = exactMatches.length > 0 ? exactMatches : partialMatches;
+                    var matches = indexMatches.length > 0 ? indexMatches
+                        : (exactMatches.length > 0 ? exactMatches
+                        : (partialMatches.length > 0 ? partialMatches
+                        : ((needle === 'smart-tv' || needle === 'tv' || needle === 'تلفزيون') && tvMatches.length > 0 ? tvMatches
+                        : (foundObjs.length > 0 && (needle === 'smart-tv' || needle === 'tv' || needle === '0' || needle === '*') ? [foundObjs[0]] : []))));
+
                     if (matches.length === 0) {
                         return JSON.stringify({
                             status: 'NOT_FOUND',
                             devices: foundDevices.join(', ')
                         });
                     }
-                    if (matches.length > 1) {
-                        var names = matches.map(function(m) { return m.name + ' (index ' + m.index + ')'; }).join(', ');
-                        return JSON.stringify({
-                            status: 'MULTIPLE_MATCHES',
-                            matchedNames: names,
-                            devices: foundDevices.join(', ')
-                        });
-                    }
 
                     var chosen = matches[0];
-                    var rSel = radioPat.replace('{index}', '' + chosen.index);
-                    var radios = findInDocs(rSel);
+                    var combinedRadioSel = [
+                        radioPat.replace(/\{index\}/g, '' + chosen.index),
+                        "input[type='radio'][name='Enable:ParentCtrl:" + chosen.index + "']",
+                        "input[type='radio'][id='Enable1:ParentCtrl:" + chosen.index + "']",
+                        "input[type='radio'][id='Enable0:ParentCtrl:" + chosen.index + "']",
+                        "input[type='radio'][id='Enable:ParentCtrl:" + chosen.index + "']"
+                    ].join(', ');
+                    var radios = findInDocs(combinedRadioSel);
 
                     // Also search row container if multiple radios share name or row
                     if (radios.length < 2 && chosen.el) {
@@ -531,15 +548,32 @@ class WebMacroEngine(private val context: Context) {
                         }
                     }
 
+                    // Determine currently checked radio value so we can auto-invert if already in targetVal
+                    var currentCheckedVal = null;
+                    for (var c = 0; c < radios.length; c++) {
+                        if (radios[c].checked) {
+                            currentCheckedVal = String(radios[c].value !== undefined && radios[c].value !== '' ? radios[c].value : (c === 0 ? '1' : '0'));
+                            break;
+                        }
+                    }
+
+                    var effectiveVal = targetVal;
+                    if (targetVal.toUpperCase() === 'TOGGLE') {
+                        effectiveVal = (currentCheckedVal === '1') ? '0' : '1';
+                    } else if (currentCheckedVal !== null && currentCheckedVal === targetVal) {
+                        // User requested: if macro runs to set OFF and finds it already OFF, flip to ON (and vice versa)
+                        effectiveVal = (currentCheckedVal === '1') ? '0' : '1';
+                    }
+
                     var targetRadio = null;
                     for (var r = 0; r < radios.length; r++) {
-                        if (String(radios[r].value) === targetVal) {
+                        if (String(radios[r].value) === effectiveVal) {
                             targetRadio = radios[r];
                             break;
                         }
                     }
                     if (!targetRadio && radios.length >= 2) {
-                        targetRadio = (targetVal === '1') ? radios[0] : radios[1];
+                        targetRadio = (effectiveVal === '1') ? radios[0] : radios[1];
                     } else if (!targetRadio && radios.length === 1) {
                         targetRadio = radios[0];
                     }
@@ -568,6 +602,7 @@ class WebMacroEngine(private val context: Context) {
                         status: 'CLICKED',
                         matchedIndex: chosen.index,
                         matchedName: chosen.name,
+                        effectiveVal: effectiveVal,
                         devices: foundDevices.join(', ')
                     });
                 })();
@@ -583,13 +618,20 @@ class WebMacroEngine(private val context: Context) {
             }
         }
 
-        suspend fun verifyRadioState(matchedIndex: Int): Boolean {
-            val rSel = radioPattern.replace("{index}", matchedIndex.toString())
+        suspend fun verifyRadioState(matchedIndex: Int, expectedVal: String): Boolean {
+            val combinedSel = listOf(
+                radioPattern.replace("{index}", matchedIndex.toString()),
+                "input[type='radio'][name='Enable:ParentCtrl:$matchedIndex']",
+                "input[type='radio'][id='Enable1:ParentCtrl:$matchedIndex']",
+                "input[type='radio'][id='Enable0:ParentCtrl:$matchedIndex']",
+                "input[type='radio'][id='Enable:ParentCtrl:$matchedIndex']"
+            ).joinToString(", ")
+            val expJson = JSONObject.quote(expectedVal)
             val js = """
                 (function() {
                     ${FINDER_HELPER_JS}
-                    var rSel = ${JSONObject.quote(rSel)};
-                    var targetVal = $targetValJson;
+                    var rSel = ${JSONObject.quote(combinedSel)};
+                    var targetVal = $expJson;
                     function checkDoc(doc) {
                         if (!doc) return null;
                         var errEl = doc.querySelector('.error, #errMsg, [id*="Error"][style*="block"]');
@@ -601,6 +643,9 @@ class WebMacroEngine(private val context: Context) {
                             if (String(radios[i].value) === targetVal) {
                                 return !!radios[i].checked;
                             }
+                        }
+                        if (radios.length >= 2) {
+                            return targetVal === '1' ? !!radios[0].checked : !!radios[1].checked;
                         }
                         if (radios.length === 1) return !!radios[0].checked;
                         var frames = doc.querySelectorAll('iframe, frame');
@@ -654,14 +699,15 @@ class WebMacroEngine(private val context: Context) {
             "CLICKED" -> {
                 val idx = attemptResult.optInt("matchedIndex", -1)
                 val name = attemptResult.optString("matchedName", deviceName)
+                val effVal = attemptResult.optString("effectiveVal", targetValue)
                 delay(1500)
-                if (verifyRadioState(idx)) {
+                if (verifyRadioState(idx, effVal)) {
                     return IndexedRadioResult(
                         success = true,
                         status = "SUCCESS",
                         matchedIndex = idx,
                         matchedDeviceName = name,
-                        message = "Device '$name' (index $idx) set to value '$targetValue' and verified.",
+                        message = "Device '$name' (index $idx) set to value '$effVal' and verified.",
                         allDevicesDump = devicesDump
                     )
                 }
@@ -669,13 +715,13 @@ class WebMacroEngine(private val context: Context) {
                 Log.w(TAG, "Radio verification failed on first attempt for '$name' (index $idx); retrying once...")
                 attemptResult = scanAndClickJs()
                 delay(1500)
-                if (verifyRadioState(idx)) {
+                if (verifyRadioState(idx, effVal)) {
                     return IndexedRadioResult(
                         success = true,
                         status = "SUCCESS",
                         matchedIndex = idx,
                         matchedDeviceName = name,
-                        message = "Device '$name' (index $idx) set to value '$targetValue' and verified after 1 retry.",
+                        message = "Device '$name' (index $idx) set to value '$effVal' and verified after 1 retry.",
                         allDevicesDump = devicesDump
                     )
                 }

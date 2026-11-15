@@ -207,34 +207,96 @@ fun WorkflowEditorScreen(
 
             // Steps Header
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "خطوات التنفيذ (${steps.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                    if (steps.isNotEmpty()) {
-                        Button(
-                            onClick = {
-                                val testAuto = Automation(
-                                    name = name.ifBlank { "Test Automation" },
-                                    steps = steps
-                                )
-                                AutomationExecutionEngine.executeAutomation(context, testAuto)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("اختبار المهمة (Test)", fontSize = 11.5.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "خطوات التنفيذ (${steps.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        if (steps.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    val testAuto = Automation(
+                                        name = name.ifBlank { "Test Automation" },
+                                        steps = steps
+                                    )
+                                    AutomationExecutionEngine.executeAutomation(context, testAuto)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("اختبار المهمة (Test)", fontSize = 11.5.sp)
+                            }
                         }
+                    }
+
+                    // 1-Tap Quick Insert for Stored Router Credentials Login Steps
+                    OutlinedButton(
+                        onClick = {
+                            val prefs = context.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE)
+                            val savedUser = prefs.getString("router_admin_user", "admin") ?: "admin"
+                            val loginSteps = listOf(
+                                AutomationStep(
+                                    title = "Open ZTE Router (192.168.1.1)",
+                                    description = "Open http://192.168.1.1",
+                                    actionType = ActionType.OPEN_URL,
+                                    isWebStep = true,
+                                    url = "http://192.168.1.1",
+                                    waitAfterNavigationSelector = "[id='Frm_Username']",
+                                    delayAfterMs = 1500L
+                                ),
+                                AutomationStep(
+                                    title = "Type Admin Username ($savedUser)",
+                                    description = "Enter $savedUser in Frm_Username",
+                                    actionType = ActionType.SET_TEXT,
+                                    isWebStep = true,
+                                    cssSelector = "[id='Frm_Username']",
+                                    selectorResourceId = "Frm_Username",
+                                    textPayload = savedUser,
+                                    delayAfterMs = 400L
+                                ),
+                                AutomationStep(
+                                    title = "Inject Stored Router Password (Credentials)",
+                                    description = "Inject encrypted router_admin_pass into Frm_Password",
+                                    actionType = ActionType.INJECT_CREDENTIAL,
+                                    isWebStep = true,
+                                    credentialKey = "router_admin_pass",
+                                    cssSelector = "[id='Frm_Password']",
+                                    selectorResourceId = "Frm_Password",
+                                    delayAfterMs = 400L
+                                ),
+                                AutomationStep(
+                                    title = "Click Login (LoginId)",
+                                    description = "Submit router login",
+                                    actionType = ActionType.CLICK_ELEMENT,
+                                    isWebStep = true,
+                                    cssSelector = "[id='LoginId']",
+                                    selectorResourceId = "LoginId",
+                                    selectorText = "Login",
+                                    waitAfterNavigationSelector = "[id='mmInternet']",
+                                    delayAfterMs = 2000L
+                                )
+                            )
+                            val mutable = steps.toMutableList()
+                            mutable.addAll(loginSteps)
+                            steps = mutable.mapIndexed { idx, s -> s.copy(order = idx + 1) }
+                            Toast.makeText(context, "تم إدراج خطوات دخول الراوتر باستخدام اليوزر والباسورد المحفوظين في النظام!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp), tint = Blue600)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("إدراج خطوات دخول الراوتر المحفوظة (Credentials)", fontSize = 12.sp, color = Blue600, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -394,6 +456,7 @@ fun StepItemCard(
                     ActionType.SET_TEXT -> "Text: \"${step.textPayload ?: ""}\""
                     ActionType.INJECT_CREDENTIAL -> "Keystore Key: ${step.credentialKey ?: "None"}"
                     ActionType.CLICK_ELEMENT -> "Target: ${step.selectorText ?: step.selectorResourceId ?: "Coords"}"
+                    ActionType.SET_INDEXED_RADIO -> "Device/Row: ${step.rowContextText ?: step.selectorText ?: "0"} -> Radio: ${step.targetRadioValue ?: "TOGGLE"} (Auto-Flip ON↔OFF)"
                     ActionType.WAIT_FOR_ELEMENT -> "Wait: ${step.selectorText ?: step.selectorResourceId}"
                     ActionType.SPEAK_TEXT -> "Speak: \"${step.textPayload ?: ""}\""
                     else -> step.description
@@ -475,10 +538,11 @@ fun StepEditorDialog(
     var selectedActionType by remember { mutableStateOf(initialStep.actionType) }
     var targetPackage by remember { mutableStateOf(initialStep.targetPackage ?: "") }
     var url by remember { mutableStateOf(initialStep.url ?: "") }
-    var selectorText by remember { mutableStateOf(initialStep.selectorText ?: "") }
+    var selectorText by remember { mutableStateOf(initialStep.selectorText ?: initialStep.rowContextText ?: "") }
     var selectorResourceId by remember { mutableStateOf(initialStep.selectorResourceId ?: "") }
     var textPayload by remember { mutableStateOf(initialStep.textPayload ?: "") }
     var credentialKey by remember { mutableStateOf(initialStep.credentialKey ?: "") }
+    var targetRadioValue by remember { mutableStateOf(initialStep.targetRadioValue ?: "0") }
     var delayAfterMs by remember { mutableStateOf(initialStep.delayAfterMs.toString()) }
     var timeoutSeconds by remember { mutableStateOf(initialStep.timeoutSeconds.toString()) }
 
@@ -576,6 +640,24 @@ fun StepEditorDialog(
                             )
                         }
                     }
+                    ActionType.SET_INDEXED_RADIO -> {
+                        item {
+                            OutlinedTextField(
+                                value = selectorText,
+                                onValueChange = { selectorText = it },
+                                label = { Text("اسم الجهاز أو رقم الصف (مثلاً: Smart-TV أو TV أو 0)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item {
+                            OutlinedTextField(
+                                value = targetRadioValue,
+                                onValueChange = { targetRadioValue = it },
+                                label = { Text("حالة Radio Button (0=تشغيل النت / 1=قفل النت / TOGGLE=عكس الحالة)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                     else -> {}
                 }
 
@@ -623,14 +705,21 @@ fun StepEditorDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val isRadioStep = selectedActionType == ActionType.SET_INDEXED_RADIO
+                    val devTarget = selectorText.ifBlank { if (isRadioStep) "Smart-TV" else null }
+                    val rVal = targetRadioValue.ifBlank { "0" }
                     val updated = initialStep.copy(
                         title = title.ifBlank { selectedActionType.labelEn },
                         actionType = selectedActionType,
                         targetPackage = targetPackage.ifBlank { null },
                         url = url.ifBlank { null },
-                        selectorText = selectorText.ifBlank { null },
-                        selectorResourceId = selectorResourceId.ifBlank { null },
-                        textPayload = textPayload.ifBlank { null },
+                        selectorText = devTarget,
+                        rowContextText = if (isRadioStep) devTarget else initialStep.rowContextText,
+                        selectorResourceId = if (isRadioStep && selectorResourceId.isBlank()) "instName_ParentCtrl:{i}" else selectorResourceId.ifBlank { null },
+                        indexedNamePattern = if (isRadioStep) (initialStep.indexedNamePattern ?: "[id='instName_ParentCtrl:{index}']") else initialStep.indexedNamePattern,
+                        indexedTargetPattern = if (isRadioStep) (initialStep.indexedTargetPattern ?: "input[type='radio'][name='Enable:ParentCtrl:{index}']") else initialStep.indexedTargetPattern,
+                        targetRadioValue = if (isRadioStep) rVal else initialStep.targetRadioValue,
+                        textPayload = if (isRadioStep) "Enable:ParentCtrl:{i}|$rVal" else textPayload.ifBlank { null },
                         credentialKey = credentialKey.ifBlank { null },
                         delayAfterMs = delayAfterMs.toLongOrNull() ?: 300,
                         timeoutSeconds = timeoutSeconds.toIntOrNull() ?: 10

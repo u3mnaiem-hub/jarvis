@@ -686,11 +686,21 @@ class ZteRouterHttpClient(
         }
 
         val needle = deviceName.trim().lowercase()
+        val indexMatch = needle.toIntOrNull()?.let { idx -> devices.filter { it.index == idx } } ?: emptyList()
         val exactMatches = devices.filter { it.name.lowercase() == needle }
         val partialMatches = devices.filter {
             it.name.lowercase().contains(needle) || needle.contains(it.name.lowercase())
         }
-        val matches = exactMatches.ifEmpty { partialMatches }
+        val tvKeywords = listOf("tv", "toshiba", "sharp", "lg", "samsung", "sony", "tcl", "شاشة", "تلفزيون")
+        val keywordMatches = if (needle in listOf("smart-tv", "tv", "television", "تلفزيون")) {
+            devices.filter { dev -> tvKeywords.any { kw -> dev.name.lowercase().contains(kw) } }
+        } else emptyList()
+
+        val matches = indexMatch
+            .ifEmpty { exactMatches }
+            .ifEmpty { partialMatches }
+            .ifEmpty { keywordMatches }
+            .ifEmpty { if (devices.isNotEmpty() && (needle in listOf("smart-tv", "tv", "0", "any", "*"))) listOf(devices.first()) else emptyList() }
 
         if (matches.isEmpty()) {
             val available = devices.joinToString(", ") { "${it.name} (index ${it.index})" }
@@ -701,17 +711,16 @@ class ZteRouterHttpClient(
                 devices = devices
             )
         }
-        if (matches.size > 1) {
-            val matchedList = matches.joinToString(", ") { "${it.name} (index ${it.index})" }
-            return@withContext ParentalControlToggleResult(
-                success = false,
-                message = "Multiple Parental Control rules matched '$deviceName': $matchedList",
-                failureType = FailureType.DEVICE_CONTROL_ERROR,
-                devices = devices
-            )
-        }
 
         val targetDevice = matches.first()
+        // Smart auto-invert: if the macro tries to set Enable to targetValue (e.g. OFF="0" or ON="1")
+        // and the device on the router is ALREADY in that state (or targetValue == "TOGGLE"),
+        // automatically flip it to the opposite state (ON <-> OFF) as requested by the user!
+        val effectiveTarget = when {
+            targetValue.equals("TOGGLE", ignoreCase = true) -> if (targetDevice.currentEnable == "1") "0" else "1"
+            targetDevice.currentEnable == targetValue -> if (targetDevice.currentEnable == "1") "0" else "1"
+            else -> targetValue
+        }
         val token = currentSessionToken ?: ""
 
         // Exact ZTE `InstSwitch` POST payload from router JS line 5900:
@@ -719,7 +728,7 @@ class ZteRouterHttpClient(
         // Header: Check = sha256(PostData)
         val postFields = linkedMapOf(
             "IF_ACTION" to "Apply",
-            "Enable" to targetValue,
+            "Enable" to effectiveTarget,
             "_InstID" to targetDevice.instId,
             "_sessionTOKEN" to token
         )
@@ -732,7 +741,7 @@ class ZteRouterHttpClient(
             method = "POST",
             url = dataUrl,
             fieldNames = postFields.keys.toList(),
-            extraInfo = "device=${targetDevice.name}, index=${targetDevice.index}, _InstID=${targetDevice.instId}, Enable=$targetValue"
+            extraInfo = "device=${targetDevice.name}, index=${targetDevice.index}, _InstID=${targetDevice.instId}, current=${targetDevice.currentEnable}, requested=$targetValue, effectiveEnable=$effectiveTarget"
         )
 
         try {
@@ -752,9 +761,10 @@ class ZteRouterHttpClient(
                 logStep("ToggleParentalControlRadio", code, "IF_ERRORSTR=${errStr ?: "N/A"}")
 
                 if (resp.isSuccessful && (errStr == "SUCC" || respXml.contains("<IF_ERRORSTR>SUCC</IF_ERRORSTR>"))) {
+                    val stateNote = if (effectiveTarget != targetValue) " (عكس الحالة تلقائياً لأنها كانت مفعلة بالفعل)" else ""
                     return@withContext ParentalControlToggleResult(
                         success = true,
-                        message = "Parental Control rule for '${targetDevice.name}' (index ${targetDevice.index}, _InstID=${targetDevice.instId}) set to Enable=$targetValue and confirmed (IF_ERRORSTR=SUCC).",
+                        message = "Parental Control rule for '${targetDevice.name}' (index ${targetDevice.index}, _InstID=${targetDevice.instId}) set to Enable=$effectiveTarget$stateNote and confirmed (IF_ERRORSTR=SUCC).",
                         httpStatusCode = code,
                         devices = devices
                     )

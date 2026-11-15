@@ -675,6 +675,10 @@ fun HomeScreen(
                 mutableStateOf<List<com.voiceagent.automation.engine.ZteRouterHttpClient.ParentalControlDevice>>(emptyList())
             }
             var isRouterBusy by remember { mutableStateOf(false) }
+            var showRouterCredDialog by remember { mutableStateOf(false) }
+            val prefs = remember { context.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE) }
+            var routerUserDraft by remember { mutableStateOf(prefs.getString("router_admin_user", "admin") ?: "admin") }
+            var routerPassDraft by remember { mutableStateOf("") }
 
             fun triggerQuickRouterMacro(deviceName: String, radioVal: String) {
                 val label = if (radioVal == "0") "تشغيل النت: $deviceName" else "قفل النت: $deviceName"
@@ -688,19 +692,98 @@ fun HomeScreen(
                             order = 1,
                             title = "Open Router 192.168.1.1",
                             actionType = com.voiceagent.automation.model.ActionType.OPEN_URL,
+                            isWebStep = true,
                             url = "https://192.168.1.1/"
                         ),
                         com.voiceagent.automation.model.AutomationStep(
                             order = 2,
                             title = "Toggle $deviceName -> $radioVal",
                             actionType = com.voiceagent.automation.model.ActionType.SET_INDEXED_RADIO,
+                            isWebStep = true,
+                            rowContextText = deviceName,
                             selectorResourceId = "instName_ParentCtrl:{i}",
                             selectorText = deviceName,
+                            indexedNamePattern = "[id='instName_ParentCtrl:{index}']",
+                            indexedTargetPattern = "input[type='radio'][id='Enable:ParentCtrl:{index}']",
+                            targetRadioValue = radioVal,
                             textPayload = "Enable:ParentCtrl:{i}|$radioVal"
                         )
                     )
                 )
                 AutomationExecutionEngine.executeAutomation(context, quickAuto)
+            }
+
+            if (showRouterCredDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRouterCredDialog = false },
+                    title = {
+                        Text("إعداد بيانات دخول الراوتر (ZTE H188A)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "تُحفظ البيانات مشفرة محلياً على هاتفك فقط لاستخدامها في الدخول التلقائي للراوتر.",
+                                fontSize = 11.5.sp,
+                                color = LightTextSecondary
+                            )
+                            OutlinedTextField(
+                                value = routerUserDraft,
+                                onValueChange = { routerUserDraft = it },
+                                label = { Text("اسم المستخدم (Username)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = routerPassDraft,
+                                onValueChange = { routerPassDraft = it },
+                                label = { Text("كلمة المرور (Password)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (routerPassDraft.isNotBlank()) {
+                                    val cleanUser = routerUserDraft.trim().ifBlank { "admin" }
+                                    prefs.edit().putString("router_admin_user", cleanUser).apply()
+                                    val passToSave = routerPassDraft
+                                    coroutineScope.launch {
+                                        val enc = com.voiceagent.automation.security.KeystoreManager.encrypt(passToSave)
+                                        db.credentialDao().insertOrUpdate(
+                                            com.voiceagent.automation.model.Credential(
+                                                key = "router_admin_pass",
+                                                label = "ZTE Router Admin Password",
+                                                encryptedData = enc.encryptedBase64,
+                                                iv = enc.ivBase64
+                                            )
+                                        )
+                                        db.credentialDao().insertOrUpdate(
+                                            com.voiceagent.automation.model.Credential(
+                                                key = "router_password",
+                                                label = "Router Password",
+                                                encryptedData = enc.encryptedBase64,
+                                                iv = enc.ivBase64
+                                            )
+                                        )
+                                        routerStatusText = "تم حفظ بيانات دخول الراوتر ($cleanUser) بنجاح!"
+                                    }
+                                    routerPassDraft = ""
+                                    showRouterCredDialog = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                        ) {
+                            Text("حفظ مشفر")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRouterCredDialog = false }) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
             }
 
             Card(
@@ -775,7 +858,19 @@ fun HomeScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { showRouterCredDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp), tint = Amber600)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("إعداد / حفظ يوزر وباسورد الراوتر للدخول التلقائي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)

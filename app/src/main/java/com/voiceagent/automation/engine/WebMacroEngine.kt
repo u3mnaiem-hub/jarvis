@@ -94,17 +94,30 @@ class WebMacroEngine(private val context: Context) {
 
     suspend fun loadUrl(url: String, timeoutMs: Long = 15000L): Boolean {
         val wv = ensureWebView()
-        val deferred = CompletableDeferred<Boolean>()
-        pageLoadedDeferred = deferred
+        val urlsToTry = buildList {
+            add(url)
+            if (url.contains("192.168.1.1")) {
+                if (url.startsWith("https://")) {
+                    add(url.replaceFirst("https://", "http://"))
+                } else if (url.startsWith("http://")) {
+                    add(url.replaceFirst("http://", "https://"))
+                }
+            }
+        }.distinct()
 
-        withContext(Dispatchers.Main) {
-            wv.loadUrl(url)
+        for (candidate in urlsToTry) {
+            val deferred = CompletableDeferred<Boolean>()
+            pageLoadedDeferred = deferred
+
+            withContext(Dispatchers.Main) {
+                wv.loadUrl(candidate)
+            }
+
+            val ok = withTimeoutOrNull(timeoutMs) { deferred.await() } ?: false
+            delay(500)
+            if (ok) return true
         }
-
-        val ok = withTimeoutOrNull(timeoutMs) { deferred.await() } ?: false
-        // Allow JS frameworks / iframes a short settle window after onPageFinished
-        delay(500)
-        return ok
+        return false
     }
 
     suspend fun checkSessionConflict(): String? {
@@ -905,6 +918,7 @@ class WebMacroEngine(private val context: Context) {
 
         // Wait up to 800ms for MainActivity to attach the visible WebView overlay
         delay(600)
+        waitForElement(listOf("[id='Frm_Username']", "[id='mmInternet']"), emptyList(), 6000L)
 
         val preState = getLoginState()
         if (preState.formPresent) {
@@ -924,7 +938,11 @@ class WebMacroEngine(private val context: Context) {
                     var b = document.getElementById('LoginId');
                     if (!u || !p || !b) return 'missing';
                     u.value = $userQuote;
+                    u.dispatchEvent(new Event('input', { bubbles: true }));
+                    u.dispatchEvent(new Event('change', { bubbles: true }));
                     p.value = $passQuote;
+                    p.dispatchEvent(new Event('input', { bubbles: true }));
+                    p.dispatchEvent(new Event('change', { bubbles: true }));
                     b.click();
                     return 'clicked';
                 })();

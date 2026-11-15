@@ -44,7 +44,8 @@ class ZteRouterHttpClient(
     val stepLogs = mutableListOf<String>()
 
     private val routerHost: String = baseUrl.toHttpUrlOrNull()?.host ?: "192.168.1.1"
-    private val normalizedBaseUrl: String = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+    private var normalizedBaseUrl: String = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+    private var usesLoginDataApi: Boolean = false
 
     /** Session token (`_sessionTmpToken`) decoded as a 24-digit string, refreshed as pages are fetched. */
     var currentSessionToken: String? = null
@@ -211,80 +212,108 @@ class ZteRouterHttpClient(
     }
 
     /**
-     * Step 1: Fetch the login page and read both `_sessionTmpToken` and `LoginFormObj._sessionTOKEN`.
+     * Step 1: Fetch the login page and read both `_sessionTmpToken` and `LoginFormObj._sessionTOKEN`
+     * (or `sess_token` from `?_type=loginData&_tag=login_entry`). Automatically falls back from HTTPS to HTTP.
      */
     suspend fun fetchLoginPageAndToken(): RouterLoginResult = withContext(Dispatchers.IO) {
-        val url = normalizedBaseUrl
-        logDebugRequest("FetchLoginPage", "GET", url)
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", USER_AGENT)
-            .get()
-            .build()
-
-        try {
-            client.newCall(request).execute().use { response ->
-                val code = response.code
-                val html = response.body?.string().orEmpty()
-                logStep("FetchLoginPage", code, "HTML length=${html.length}")
-
-                if (!response.isSuccessful) {
-                    return@withContext RouterLoginResult.Failure(
-                        FailureType.NETWORK_OR_CERTIFICATE_ERROR,
-                        "Router login page request returned HTTP $code",
-                        code
-                    )
-                }
-
-                if (isAuthenticatedHtml(html)) {
-                    val existingTok = extractSessionTokenFromHtml(html) ?: currentSessionToken.orEmpty()
-                    currentSessionToken = existingTok
-                    lastAuthenticatedHtml = html
-                    return@withContext RouterLoginResult.Success(existingTok, html)
-                }
-
-                val tmpToken = extractSessionTokenFromHtml(html)
-                val loginFormToken = extractLoginFormTokenFromHtml(html)
-                if (tmpToken.isNullOrBlank() && loginFormToken.isNullOrBlank()) {
-                    return@withContext RouterLoginResult.Failure(
-                        FailureType.TOKEN_NOT_FOUND,
-                        "Token not found: _sessionTmpToken was not present in $url response",
-                        code
-                    )
-                }
-                currentSessionToken = tmpToken ?: loginFormToken
-                currentLoginFormToken = loginFormToken ?: tmpToken
-                logStep(
-                    "ReadSessionToken",
-                    code,
-                    "tmpTokenLen=${currentSessionToken?.length ?: 0}, loginFormTokenLen=${currentLoginFormToken?.length ?: 0}"
-                )
-                RouterLoginResult.Success(currentSessionToken.orEmpty(), html)
+        val candidateUrls = buildList {
+            add(normalizedBaseUrl)
+            if (normalizedBaseUrl.startsWith("https://")) {
+                add(normalizedBaseUrl.replaceFirst("https://", "http://"))
+            } else if (normalizedBaseUrl.startsWith("http://")) {
+                add(normalizedBaseUrl.replaceFirst("http://", "https://"))
             }
-        } catch (e: SSLHandshakeException) {
-            logStep("FetchLoginPage", -1, "SSL certificate error: ${e.message}")
-            RouterLoginResult.Failure(
-                FailureType.NETWORK_OR_CERTIFICATE_ERROR,
-                "Certificate error connecting to $url: ${e.message}"
-            )
-        } catch (e: IOException) {
-            logStep("FetchLoginPage", -1, "Network error: ${e.message}")
-            RouterLoginResult.Failure(
-                FailureType.NETWORK_OR_CERTIFICATE_ERROR,
-                "Network error connecting to $url: ${e.message}"
-            )
+        }.distinct()
+
+        var lastErr: RouterLoginResult.Failure? = null
+
+        for (candidateUrl in candidateUrls) {
+            logDebugRequest("FetchLoginPage", "GET", candidateUrl)
+            val request = Request.Builder()
+                .url(candidateUrl)
+                .header("User-Agent", USER_AGENT)
+                .get()
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    val code = response.code
+                    val html = response.body?.string().orEmpty()
+                    logStep("FetchLoginPage", code, "url=$candidateUrl, HTML length=${html.length}")
+
+                    if (!response.isSuccessful) {
+                        lastErr = RouterLoginResult.Failure(
+                            FailureType.NETWORK_OR_CERTIFICATE_ERROR,
+                            "Router login page request returned HTTP $code",
+                            code
+                        )
+                        return@use
+                    }
+
+                    normalizedBaseUrl = candidateUrl
+
+                    if (isAuthenticatedHtml(html)) {
+                        val existingTok = extractSessionTokenFromHtml(html) ?: currentSessionToken.orEmpty()
+                        currentSessionToken = existingTok
+                        lastAuthenticatedHtml = html
+                        return@withContext RouterLoginResult.Success(existingTok, html)
+                    }
+
+                    var tmpToken = extractSessionTokenFromHtml(html)
+                    var loginFormToken = extractLoginFormTokenFromHtml(html)
+
+                    // Check WE Egypt ZTE H188A / H168N `_type=loginData&_tag=login_entry` JSON endpoint if HTML tokens are absent
+                    if (tmpToken.isNullOrBlank() && loginFormToken.isNullOrBlank()) {
+                        val entryTok = fetchLoginDataEntryToken()
+                        if (!entryTok.isNullOrBlank()) {
+                            usesLoginDataApi = true
+                            tmpToken = entryTok
+                            loginFormToken = entryTok
+                        }
+                    }
+
+                    if (tmpToken.isNullOrBlank() && loginFormToken.isNullOrBlank()) {
+                        lastErr = RouterLoginResult.Failure(
+                            FailureType.TOKEN_NOT_FOUND,
+                            "Token not found: _sessionTmpToken was not present in $candidateUrl response",
+                            code
+                        )
+                        return@use
+                    }
+                    currentSessionToken = tmpToken ?: loginFormToken
+                    currentLoginFormToken = loginFormToken ?: tmpToken
+                    logStep(
+                        "ReadSessionToken",
+                        code,
+                        "tmpTokenLen=${currentSessionToken?.length ?: 0}, loginFormTokenLen=${currentLoginFormToken?.length ?: 0}, loginDataApi=$usesLoginDataApi"
+                    )
+                    return@withContext RouterLoginResult.Success(currentSessionToken.orEmpty(), html)
+                }
+            } catch (e: SSLHandshakeException) {
+                logStep("FetchLoginPage", -1, "SSL error on $candidateUrl: ${e.message}")
+                lastErr = RouterLoginResult.Failure(
+                    FailureType.NETWORK_OR_CERTIFICATE_ERROR,
+                    "Certificate error connecting to $candidateUrl: ${e.message}"
+                )
+            } catch (e: IOException) {
+                logStep("FetchLoginPage", -1, "Network error on $candidateUrl: ${e.message}")
+                lastErr = RouterLoginResult.Failure(
+                    FailureType.NETWORK_OR_CERTIFICATE_ERROR,
+                    "Network error connecting to $candidateUrl: ${e.message}"
+                )
+            }
         }
+
+        lastErr ?: RouterLoginResult.Failure(
+            FailureType.NETWORK_OR_CERTIFICATE_ERROR,
+            "Failed to reach router at $normalizedBaseUrl"
+        )
     }
 
-    /**
-     * Fetches the one-time login challenge (`xmlObj`) from `/function_module/login_module/login_page/logintoken_lua.lua`
-     * which returns `<ajax_response_xml_root>16037604</ajax_response_xml_root>`.
-     */
-    private fun fetchLoginChallengeSalt(): String? {
-        val challengeUrl = "${normalizedBaseUrl}function_module/login_module/login_page/logintoken_lua.lua"
-        logDebugRequest("FetchLoginChallenge", "GET", challengeUrl)
+    private fun fetchLoginDataEntryToken(): String? {
+        val entryUrl = "${normalizedBaseUrl}?_type=loginData&_tag=login_entry"
         val req = Request.Builder()
-            .url(challengeUrl)
+            .url(entryUrl)
             .header("User-Agent", USER_AGENT)
             .header("Referer", normalizedBaseUrl)
             .header("X-Requested-With", "XMLHttpRequest")
@@ -293,33 +322,68 @@ class ZteRouterHttpClient(
         return try {
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                val m = Regex("""<ajax_response_xml_root>([^<]+)</ajax_response_xml_root>""").find(body)
-                val salt = m?.groupValues?.get(1)?.trim()
-                logStep("FetchLoginChallenge", resp.code, "saltLen=${salt?.length ?: 0}")
-                salt?.takeIf { it.isNotEmpty() }
+                val m = Regex(""""sess_token"\s*:\s*"([^"]+)"""").find(body)
+                m?.groupValues?.get(1)?.let { decodeHexEscapes(it).trim() }?.takeIf { it.isNotEmpty() }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "fetchLoginChallengeSalt failed: ${e.message}")
+        } catch (_: Exception) {
             null
         }
     }
 
     /**
-     * Reusable login function for ZTE H188 router macros.
-     *
-     * Attempt 1 (Exact ZTE H188 Firmware Formula):
-     *   - `_sessionTOKEN` = `LoginFormObj.addParameter("_sessionTOKEN", ...)` (the 24-digit login form token)
-     *   - `Password` = `sha256(plainPassword + xmlChallenge)` from `logintoken_lua.lua`
-     * Attempt 2 (Fallback with `_sessionTmpToken` + `logintoken_lua.lua` or `sha256(plainPassword + token)`):
-     *   - After a 5-second pause
-     * Attempt 3 (Fallback `sha256(sha256(plainPassword) + token)`):
-     *   - After a 5-second pause
+     * Fetches the one-time login challenge (`xmlObj`) from `/function_module/login_module/login_page/logintoken_lua.lua`
+     * or `/?_type=loginData&_tag=login_token` which returns `<ajax_response_xml_root>16037604</ajax_response_xml_root>`
+     * or `<login_token>16037604</login_token>`.
+     */
+    private fun fetchLoginChallengeSalt(): String? {
+        val ts = System.currentTimeMillis()
+        val endpoints = if (usesLoginDataApi) {
+            listOf(
+                "${normalizedBaseUrl}?_type=loginData&_tag=login_token&_=$ts",
+                "${normalizedBaseUrl}function_module/login_module/login_page/logintoken_lua.lua?_=$ts"
+            )
+        } else {
+            listOf(
+                "${normalizedBaseUrl}function_module/login_module/login_page/logintoken_lua.lua?_=$ts",
+                "${normalizedBaseUrl}?_type=loginData&_tag=login_token&_=$ts"
+            )
+        }
+
+        for (challengeUrl in endpoints) {
+            logDebugRequest("FetchLoginChallenge", "GET", challengeUrl)
+            val req = Request.Builder()
+                .url(challengeUrl)
+                .header("User-Agent", USER_AGENT)
+                .header("Referer", normalizedBaseUrl)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .get()
+                .build()
+            try {
+                client.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string().orEmpty()
+                    val m = Regex("""<(?:ajax_response_xml_root|login_token)>([^<]+)</(?:ajax_response_xml_root|login_token)>""").find(body)
+                    val salt = m?.groupValues?.get(1)?.trim()
+                    if (!salt.isNullOrEmpty()) {
+                        logStep("FetchLoginChallenge", resp.code, "saltLen=${salt.length}")
+                        return salt
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "fetchLoginChallengeSalt failed for $challengeUrl: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    /**
+     * Single-attempt precision HTTP login for ZTE H188A / H168N router macros.
+     * Uses only 1 attempt so it never triggers the router's 3-strike 60-second lockout before WebMacroEngine fallback.
      */
     suspend fun login(
         plainPassword: String,
         username: String = "admin"
     ): RouterLoginResult = withContext(Dispatchers.IO) {
-        val maxAttempts = 3
+        val maxAttempts = 1
         var lastFailure: RouterLoginResult.Failure? = null
 
         for (attempt in 1..maxAttempts) {
@@ -391,11 +455,16 @@ class ZteRouterHttpClient(
                 }
             }
 
+            val postTargetUrl = if (usesLoginDataApi) {
+                "${normalizedBaseUrl}?_type=loginData&_tag=login_entry"
+            } else {
+                normalizedBaseUrl
+            }
             val fieldNames = listOf("Username", "Password", "action", "_sessionTOKEN")
             logDebugRequest(
                 stepName = "LoginAttempt#$attempt",
                 method = "POST",
-                url = normalizedBaseUrl,
+                url = postTargetUrl,
                 fieldNames = fieldNames,
                 extraInfo = "formula=$formulaLabel"
             )
@@ -408,7 +477,7 @@ class ZteRouterHttpClient(
                 .build()
 
             val postReq = Request.Builder()
-                .url(normalizedBaseUrl)
+                .url(postTargetUrl)
                 .header("User-Agent", USER_AGENT)
                 .header("Referer", normalizedBaseUrl)
                 .header("Origin", normalizedBaseUrl.removeSuffix("/"))
@@ -436,7 +505,8 @@ class ZteRouterHttpClient(
                         return@use
                     }
 
-                    if (isAuthenticatedHtml(respHtml)) {
+                    val isJsonLoginSuccess = usesLoginDataApi && (respHtml.contains("\"login_need_refresh\":1") || respHtml.contains("\"login_need_refresh\": 1"))
+                    if (isAuthenticatedHtml(respHtml) || isJsonLoginSuccess) {
                         lastAuthenticatedHtml = respHtml
                         logStep("LoginSuccess", code, "Authenticated on attempt #$attempt ($formulaLabel)")
                         return@withContext RouterLoginResult.Success(

@@ -441,20 +441,34 @@ object AutomationExecutionEngine {
             }
 
             ActionType.SET_TEXT -> {
-                val value = step.textPayload ?: ""
-                val ok = webEngine.fillField(cssSelectors, textCandidates, value, timeoutMs, isSensitive = false)
+                val rawValue = step.textPayload ?: ""
+                if (rawValue.startsWith("{{CREDENTIAL:") && rawValue.endsWith("}}")) {
+                    val credKey = rawValue.removePrefix("{{CREDENTIAL:").removeSuffix("}}").trim()
+                    val cred = db.credentialDao().getCredentialByKey(credKey)
+                        ?: db.credentialDao().getCredentialByKey("router_admin_pass")
+                        ?: db.credentialDao().getCredentialByKey("router_password")
+                        ?: return StepResult(false, "Credential '$credKey' not found in vault. Please save your router password first.", actionAttempted = false, elementFound = false)
+                    val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
+                    val ok = webEngine.fillField(cssSelectors, textCandidates, decryptedPassword, timeoutMs, isSensitive = true)
+                    if (ok) {
+                        db.credentialDao().updateLastUsed(cred.key, System.currentTimeMillis())
+                    }
+                    return StepResult(ok, if (ok) null else "Failed to fill password field in WebView", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
+                }
+                val ok = webEngine.fillField(cssSelectors, textCandidates, rawValue, timeoutMs, isSensitive = false)
                 StepResult(ok, if (ok) null else "Failed to fill web field '${cssSelectors.firstOrNull() ?: textCandidates.firstOrNull()}'", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
             }
 
             ActionType.INJECT_CREDENTIAL -> {
                 val key = step.credentialKey ?: return StepResult(false, "Credential key is not specified", actionAttempted = false, elementFound = false)
                 val cred = db.credentialDao().getCredentialByKey(key)
-                    ?: (if (key == "router_password") db.credentialDao().getCredentialByKey("router_admin_pass") else null)
+                    ?: db.credentialDao().getCredentialByKey("router_admin_pass")
+                    ?: db.credentialDao().getCredentialByKey("router_password")
                     ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
                 val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
                 val ok = webEngine.fillField(cssSelectors, textCandidates, decryptedPassword, timeoutMs, isSensitive = true)
                 if (ok) {
-                    db.credentialDao().updateLastUsed(key, System.currentTimeMillis())
+                    db.credentialDao().updateLastUsed(cred.key, System.currentTimeMillis())
                 }
                 StepResult(ok, if (ok) null else "Failed to fill password field in WebView", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
             }
@@ -466,7 +480,9 @@ object AutomationExecutionEngine {
                     ?: step.selectorText?.takeIf { it.isNotBlank() }
                     ?: lastWaitedElementText
                     ?: return StepResult(false, "Device name parameter is missing", actionAttempted = false, elementFound = false)
-                val targetVal = step.targetRadioValue ?: "1"
+                val targetVal = step.targetRadioValue
+                    ?: step.textPayload?.substringAfter("|", "")?.takeIf { it.isNotBlank() }
+                    ?: "1"
 
                 val indexedRes = webEngine.setIndexedDeviceRadio(
                     namePattern = namePattern,
@@ -1223,13 +1239,13 @@ object AutomationExecutionEngine {
             val u = it.url?.lowercase() ?: ""
             u.contains("192.168.1.1")
         }
-        val hasZteSelectors = automation.steps.any {
-            it.cssSelector?.contains("Frm_Username") == true ||
-                it.cssSelector?.contains("Frm_Password") == true ||
-                it.cssSelector?.contains("LoginId") == true ||
-                it.actionType == ActionType.SET_INDEXED_RADIO
+        val hasParentalControlStep = automation.steps.any {
+            it.actionType == ActionType.SET_INDEXED_RADIO ||
+                it.selectorResourceId?.contains("ParentCtrl", ignoreCase = true) == true ||
+                it.cssSelector?.contains("ParentCtrl", ignoreCase = true) == true ||
+                it.indexedNamePattern?.contains("ParentCtrl", ignoreCase = true) == true
         }
-        return hasRouterUrl && hasZteSelectors
+        return hasRouterUrl && hasParentalControlStep
     }
 
     /**
@@ -1248,7 +1264,7 @@ object AutomationExecutionEngine {
             ?: db.credentialDao().getCredentialByKey("router_admin_pass")
             ?: return client to ZteRouterHttpClient.RouterLoginResult.Failure(
                 ZteRouterHttpClient.FailureType.LOGIN_REJECTED,
-                "Router password not found in secure Credential Vault (key '$credentialKey'). Please save your router password in Credentials first."
+                "Router password not found in secure Credential Vault (key '$credentialKey'). Please save your router password first."
             )
         val plainPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
         db.credentialDao().updateLastUsed(cred.key, System.currentTimeMillis())
@@ -1270,13 +1286,21 @@ object AutomationExecutionEngine {
         val deviceName = radioStep?.rowContextText?.takeIf { it.isNotBlank() }
             ?: radioStep?.selectorText?.takeIf { it.isNotBlank() }
             ?: "Smart-TV"
+        val parsedPayloadVal = radioStep?.textPayload?.substringAfter("|", "")?.trim()?.takeIf { it.isNotBlank() }
         val enableRule = when {
             radioStep?.targetRadioValue != null -> radioStep.targetRadioValue == "1"
+            parsedPayloadVal != null -> parsedPayloadVal == "1"
             automation.id == "demo_disable_tv_internet" -> true
             else -> false
         }
         val credKey = automation.steps.firstOrNull { it.actionType == ActionType.INJECT_CREDENTIAL }
             ?.credentialKey ?: "router_admin_pass"
+        val prefs = context.getSharedPreferences("voice_agent_prefs", Context.MODE_PRIVATE)
+        val routerUsername = automation.steps.firstOrNull {
+            it.actionType == ActionType.SET_TEXT && (it.selectorResourceId == "Frm_Username" || it.cssSelector?.contains("Frm_Username") == true)
+        }?.textPayload?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("router_admin_user", "admin")?.takeIf { it.isNotBlank() }
+            ?: "admin"
 
         val baseUrl = "https://192.168.1.1/"
         var client: ZteRouterHttpClient? = null
@@ -1299,7 +1323,7 @@ object AutomationExecutionEngine {
             AutomationForegroundService.start(
                 context,
                 automation.name,
-                "1. Direct HTTPS Login to $baseUrl",
+                "1. Direct Login to Router ($routerUsername)",
                 1,
                 totalLogicalSteps
             )
@@ -1307,20 +1331,21 @@ object AutomationExecutionEngine {
                 db = db,
                 baseUrl = baseUrl,
                 credentialKey = credKey,
-                username = "admin"
+                username = routerUsername
             )
             client = httpClient
 
             when (loginResult) {
                 is ZteRouterHttpClient.RouterLoginResult.Failure -> {
-                    // If Direct HTTP was not explicitly rejected for bad password/lockout and we have plainPassword,
-                    // automatically run the Out-of-the-Box Native JS Function Bridge in a visible WebView!
-                    if (plainPassword != null && loginResult.category != ZteRouterHttpClient.FailureType.LOGIN_REJECTED) {
+                    val isLockedOut = loginResult.message.contains("locked", ignoreCase = true) ||
+                        loginResult.message.contains("lockout", ignoreCase = true)
+                    // Always fall back to the Native JS Function Bridge in the live WebView if not locked out!
+                    if (plainPassword != null && !isLockedOut) {
                         val bridgeEngine = WebMacroEngine(context)
                         try {
                             val bridgeRes = bridgeEngine.executeZteNativeJsBridge(
                                 baseUrl = baseUrl,
-                                username = "admin",
+                                username = routerUsername,
                                 plainPassword = plainPassword,
                                 deviceName = deviceName,
                                 enableRule = enableRule

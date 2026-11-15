@@ -21,42 +21,87 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.engine.AutomationRecorderEngine
 import com.voiceagent.automation.model.ActionType
 import com.voiceagent.automation.model.AutomationStep
+import com.voiceagent.automation.model.Credential
+import com.voiceagent.automation.security.KeystoreManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
-private class JarvisWebSnifferBridge {
+private class JarvisWebSnifferBridge(private val appContext: android.content.Context) {
     @JavascriptInterface
-    fun onRouterLoginSubmitted(username: String) {
+    fun onRouterLoginSubmitted(username: String, password: String) {
+        val cleanUser = username.trim().ifBlank { "admin" }
+        if (password.isNotBlank()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val prefs = appContext.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE)
+                    prefs.edit().putString("router_admin_user", cleanUser).apply()
+                    val enc = KeystoreManager.encrypt(password)
+                    val db = VoiceAgentDatabase.getInstance(appContext)
+                    db.credentialDao().insertOrUpdate(
+                        Credential(
+                            key = "router_admin_pass",
+                            label = "ZTE Router Admin Password",
+                            encryptedData = enc.encryptedBase64,
+                            iv = enc.ivBase64
+                        )
+                    )
+                    db.credentialDao().insertOrUpdate(
+                        Credential(
+                            key = "router_password",
+                            label = "Router Password",
+                            encryptedData = enc.encryptedBase64,
+                            iv = enc.ivBase64
+                        )
+                    )
+                    Log.i("JarvisWebSniffer", "Auto-saved router credentials to Keystore vault for user=$cleanUser")
+                } catch (e: Exception) {
+                    Log.w("JarvisWebSniffer", "Failed to auto-save router credentials: ${e.message}")
+                }
+            }
+        }
         if (!AutomationRecorderEngine.isRecordingActive) return
-        Log.i("JarvisWebSniffer", "Captured router login for user=$username")
+        Log.i("JarvisWebSniffer", "Captured router login for user=$cleanUser")
         AutomationRecorderEngine.addRecordedStep(
             AutomationStep(
-                title = "Type Admin Username ($username)",
-                description = "Enter $username in Frm_Username",
+                title = "Type Admin Username ($cleanUser)",
+                description = "Enter $cleanUser in Frm_Username",
                 actionType = ActionType.SET_TEXT,
+                isWebStep = true,
+                cssSelector = "[id='Frm_Username']",
                 selectorResourceId = "Frm_Username",
-                textPayload = username.ifBlank { "admin" },
-                delayAfterMs = 500L
+                textPayload = cleanUser,
+                delayAfterMs = 400L
             )
         )
         AutomationRecorderEngine.addRecordedStep(
             AutomationStep(
-                title = "Type Router Password",
-                description = "Enter stored router_password in Frm_Password",
-                actionType = ActionType.SET_TEXT,
+                title = "Inject Router Password",
+                description = "Inject encrypted router_admin_pass into Frm_Password",
+                actionType = ActionType.INJECT_CREDENTIAL,
+                isWebStep = true,
+                credentialKey = "router_admin_pass",
+                cssSelector = "[id='Frm_Password']",
                 selectorResourceId = "Frm_Password",
-                textPayload = "{{CREDENTIAL:router_password}}",
-                delayAfterMs = 500L
+                delayAfterMs = 400L
             )
         )
         AutomationRecorderEngine.addRecordedStep(
             AutomationStep(
                 title = "Click Login (LoginId)",
-                description = "Submit router login",
+                description = "Submit router login via native JS",
                 actionType = ActionType.CLICK_ELEMENT,
+                isWebStep = true,
+                cssSelector = "[id='LoginId']",
                 selectorResourceId = "LoginId",
-                delayAfterMs = 3000L
+                selectorText = "Login",
+                waitAfterNavigationSelector = "[id='mmInternet']",
+                delayAfterMs = 2000L
             )
         )
     }
@@ -68,11 +113,13 @@ private class JarvisWebSnifferBridge {
         AutomationRecorderEngine.addRecordedStep(
             AutomationStep(
                 title = "Click Menu: ${label.ifBlank { elementId }}",
-                description = "Click router menu item #$elementId",
+                description = "Click router element [id='$elementId']",
                 actionType = ActionType.CLICK_ELEMENT,
+                isWebStep = true,
+                cssSelector = "[id='$elementId']",
                 selectorResourceId = elementId,
                 selectorText = label,
-                delayAfterMs = 2000L
+                delayAfterMs = 1500L
             )
         )
     }
@@ -88,12 +135,52 @@ private class JarvisWebSnifferBridge {
                 title = "$stateLabel: $targetDevice",
                 description = "Find instName_ParentCtrl:N == $targetDevice -> click Enable:ParentCtrl:N ($radioValue)",
                 actionType = ActionType.SET_INDEXED_RADIO,
+                isWebStep = true,
+                rowContextText = targetDevice,
                 selectorResourceId = "instName_ParentCtrl:{i}",
                 selectorText = targetDevice,
+                indexedNamePattern = "[id='instName_ParentCtrl:{index}']",
+                indexedTargetPattern = "input[type='radio'][id='Enable:ParentCtrl:{index}']",
+                targetRadioValue = radioValue,
                 textPayload = "Enable:ParentCtrl:{i}|$radioValue",
                 delayAfterMs = 1500L
             )
         )
+    }
+
+    @JavascriptInterface
+    fun onGenericWebAction(actionKind: String, selector: String, label: String, value: String) {
+        if (!AutomationRecorderEngine.isRecordingActive) return
+        if (selector.isBlank()) return
+        Log.i("JarvisWebSniffer", "Captured generic web action kind=$actionKind sel=$selector label=$label")
+        when (actionKind) {
+            "click" -> {
+                AutomationRecorderEngine.addRecordedStep(
+                    AutomationStep(
+                        title = "Click: ${label.ifBlank { selector }}",
+                        description = "Click web element $selector",
+                        actionType = ActionType.CLICK_ELEMENT,
+                        isWebStep = true,
+                        cssSelector = selector,
+                        selectorText = label.takeIf { it.isNotBlank() },
+                        delayAfterMs = 1200L
+                    )
+                )
+            }
+            "input" -> {
+                AutomationRecorderEngine.addRecordedStep(
+                    AutomationStep(
+                        title = "Fill: ${label.ifBlank { selector }}",
+                        description = "Set value on $selector",
+                        actionType = ActionType.SET_TEXT,
+                        isWebStep = true,
+                        cssSelector = selector,
+                        textPayload = value,
+                        delayAfterMs = 600L
+                    )
+                )
+            }
+        }
     }
 }
 
@@ -104,6 +191,8 @@ fun InAppBrowserScreen(
     initialUrl: String = "http://192.168.1.1",
     onNavigateBack: () -> Unit
 ) {
+    val localContext = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var urlText by remember { mutableStateOf(initialUrl) }
     var currentUrl by remember { mutableStateOf(initialUrl) }
     var isLoading by remember { mutableStateOf(false) }
@@ -199,6 +288,51 @@ fun InAppBrowserScreen(
                 },
                 actions = {
                     IconButton(onClick = {
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val db = VoiceAgentDatabase.getInstance(localContext)
+                            val cred = db.credentialDao().getCredentialByKey("router_admin_pass")
+                                ?: db.credentialDao().getCredentialByKey("router_password")
+                            val prefs = localContext.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE)
+                            val savedUser = prefs.getString("router_admin_user", "admin") ?: "admin"
+                            if (cred != null) {
+                                val plainPass = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
+                                val uQuote = JSONObject.quote(savedUser)
+                                val pQuote = JSONObject.quote(plainPass)
+                                launch(Dispatchers.Main) {
+                                    webViewInstance?.evaluateJavascript(
+                                        """
+                                        (function() {
+                                            var u = document.getElementById('Frm_Username');
+                                            var p = document.getElementById('Frm_Password');
+                                            var b = document.getElementById('LoginId');
+                                            if (u && p && b) {
+                                                u.value = $uQuote;
+                                                u.dispatchEvent(new Event('input', { bubbles: true }));
+                                                u.dispatchEvent(new Event('change', { bubbles: true }));
+                                                p.value = $pQuote;
+                                                p.dispatchEvent(new Event('input', { bubbles: true }));
+                                                p.dispatchEvent(new Event('change', { bubbles: true }));
+                                                b.click();
+                                            }
+                                        })();
+                                        """.trimIndent(),
+                                        null
+                                    )
+                                }
+                            } else {
+                                launch(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(
+                                        localContext,
+                                        "احفظ باسورد الراوتر أولاً أو اكتبه مرة واحدة في صفحة الراوتر وسيُحفظ تلقائياً",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.Key, contentDescription = "Auto Login Router", tint = Color(0xFFF59E0B))
+                    }
+                    IconButton(onClick = {
                         val routerUrl = "http://192.168.1.1"
                         urlText = routerUrl
                         currentUrl = routerUrl
@@ -267,7 +401,7 @@ fun InAppBrowserScreen(
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         }
 
-                        addJavascriptInterface(JarvisWebSnifferBridge(), "JarvisSniffer")
+                        addJavascriptInterface(JarvisWebSnifferBridge(context.applicationContext), "JarvisSniffer")
 
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -294,13 +428,21 @@ fun InAppBrowserScreen(
                                                 var id = el.id || '';
                                                 if (id === 'LoginId') {
                                                     var uEl = document.getElementById('Frm_Username');
+                                                    var pEl = document.getElementById('Frm_Password');
                                                     var uVal = uEl ? (uEl.value || 'admin') : 'admin';
-                                                    if (window.JarvisSniffer) window.JarvisSniffer.onRouterLoginSubmitted(uVal);
+                                                    var pVal = pEl ? (pEl.value || '') : '';
+                                                    if (window.JarvisSniffer) window.JarvisSniffer.onRouterLoginSubmitted(uVal, pVal);
                                                     break;
                                                 }
-                                                if (id === 'mmInternet' || id === 'smParentCtrl' || id.indexOf('mm') === 0 || id.indexOf('sm') === 0) {
+                                                if (id === 'mmInternet' || id === 'smParentCtrl' || id.indexOf('mm') === 0 || id.indexOf('sm') === 0 || id.indexOf('ssm') === 0) {
                                                     var txt = (el.innerText || el.textContent || id).trim();
                                                     if (window.JarvisSniffer) window.JarvisSniffer.onMenuClicked(id, txt);
+                                                    break;
+                                                }
+                                                var tag = (el.tagName || '').toLowerCase();
+                                                if (id && (tag === 'input' || tag === 'button' || tag === 'a') && el.type !== 'text' && el.type !== 'password' && el.type !== 'radio') {
+                                                    var bTxt = (el.value || el.innerText || el.textContent || id).trim();
+                                                    if (window.JarvisSniffer) window.JarvisSniffer.onMenuClicked(id, bTxt);
                                                     break;
                                                 }
                                                 el = el.parentElement;
@@ -309,9 +451,10 @@ fun InAppBrowserScreen(
 
                                         document.addEventListener('change', function(e) {
                                             var t = e.target;
-                                            if (!t || t.type !== 'radio') return;
+                                            if (!t) return;
                                             var name = t.name || '';
-                                            if (name.indexOf('Enable:ParentCtrl:') === 0) {
+                                            var id = t.id || '';
+                                            if (t.type === 'radio' && name.indexOf('Enable:ParentCtrl:') === 0) {
                                                 var idxStr = name.split(':')[2] || '0';
                                                 var idx = parseInt(idxStr, 10) || 0;
                                                 var devEl = document.getElementById('instName_ParentCtrl:' + idx);
@@ -320,6 +463,19 @@ fun InAppBrowserScreen(
                                                 var instId = instEl ? (instEl.value || '') : '';
                                                 if (window.JarvisSniffer) {
                                                     window.JarvisSniffer.onParentalControlRadioToggled(idx, devName, String(t.value), instId);
+                                                }
+                                                return;
+                                            }
+                                            if (id === 'Frm_Username' || id === 'Frm_Password') return;
+                                            if (t.type === 'radio' || t.type === 'checkbox') {
+                                                var sel = id ? ("[id='" + id + "']") : (name ? ("input[name='" + name + "'][value='" + t.value + "']") : '');
+                                                if (sel && window.JarvisSniffer) {
+                                                    window.JarvisSniffer.onGenericWebAction('click', sel, id || name, String(t.value || ''));
+                                                }
+                                            } else if (id) {
+                                                var inSel = "[id='" + id + "']";
+                                                if (window.JarvisSniffer) {
+                                                    window.JarvisSniffer.onGenericWebAction('input', inSel, id, String(t.value || ''));
                                                 }
                                             }
                                         }, true);

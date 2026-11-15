@@ -543,7 +543,12 @@ fun StepEditorDialog(
     var textPayload by remember { mutableStateOf(initialStep.textPayload ?: "") }
     var credentialKey by remember { mutableStateOf(initialStep.credentialKey ?: "") }
     var targetRadioValue by remember { mutableStateOf(initialStep.targetRadioValue ?: "0") }
-    var delayAfterMs by remember { mutableStateOf(initialStep.delayAfterMs.toString()) }
+    var delayAfterMs by remember {
+        mutableStateOf(
+            if (initialStep.actionType == ActionType.SET_INDEXED_RADIO && initialStep.delayAfterMs < 2000L) "2000"
+            else initialStep.delayAfterMs.toString()
+        )
+    }
     var timeoutSeconds by remember { mutableStateOf(initialStep.timeoutSeconds.toString()) }
 
     var expandedTypeDropdown by remember { mutableStateOf(false) }
@@ -721,8 +726,8 @@ fun StepEditorDialog(
                         targetRadioValue = if (isRadioStep) rVal else initialStep.targetRadioValue,
                         textPayload = if (isRadioStep) "Enable:ParentCtrl:{i}|$rVal" else textPayload.ifBlank { null },
                         credentialKey = credentialKey.ifBlank { null },
-                        delayAfterMs = delayAfterMs.toLongOrNull() ?: 300,
-                        timeoutSeconds = timeoutSeconds.toIntOrNull() ?: 10
+                        delayAfterMs = delayAfterMs.toLongOrNull() ?: if (isRadioStep) 2000L else 400L,
+                        timeoutSeconds = timeoutSeconds.toIntOrNull() ?: 12
                     )
                     onSave(updated)
                 },

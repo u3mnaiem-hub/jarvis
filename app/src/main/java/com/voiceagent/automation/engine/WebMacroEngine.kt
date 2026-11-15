@@ -404,7 +404,8 @@ class WebMacroEngine(private val context: Context) {
         indexEnd: Int,
         deviceName: String,
         targetValue: String,
-        timeoutMs: Long = 12000L
+        timeoutMs: Long = 15000L,
+        settleDelayMs: Long = 2000L
     ): IndexedRadioResult {
         val firstNameSelector = namePattern.replace("{index}", indexStart.toString())
         val firstWaitStart = System.currentTimeMillis()
@@ -597,6 +598,11 @@ class WebMacroEngine(private val context: Context) {
                     });
                     try { targetRadio.click(); } catch (e) {}
                     try { targetRadio.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                    try {
+                        if (docWin.jQuery) {
+                            docWin.jQuery(targetRadio).prop('checked', true).trigger('click').trigger('change');
+                        }
+                    } catch (e) {}
 
                     return JSON.stringify({
                         status: 'CLICKED',
@@ -697,31 +703,32 @@ class WebMacroEngine(private val context: Context) {
                 )
             }
             "CLICKED" -> {
+                val waitMs = settleDelayMs.coerceAtLeast(2000L)
                 val idx = attemptResult.optInt("matchedIndex", -1)
                 val name = attemptResult.optString("matchedName", deviceName)
                 val effVal = attemptResult.optString("effectiveVal", targetValue)
-                delay(1500)
+                delay(waitMs)
                 if (verifyRadioState(idx, effVal)) {
                     return IndexedRadioResult(
                         success = true,
                         status = "SUCCESS",
                         matchedIndex = idx,
                         matchedDeviceName = name,
-                        message = "Device '$name' (index $idx) set to value '$effVal' and verified.",
+                        message = "Device '$name' (index $idx) set to value '$effVal' and verified after ${waitMs}ms.",
                         allDevicesDump = devicesDump
                     )
                 }
                 // Retry once as required by spec
                 Log.w(TAG, "Radio verification failed on first attempt for '$name' (index $idx); retrying once...")
                 attemptResult = scanAndClickJs()
-                delay(1500)
+                delay(waitMs)
                 if (verifyRadioState(idx, effVal)) {
                     return IndexedRadioResult(
                         success = true,
                         status = "SUCCESS",
                         matchedIndex = idx,
                         matchedDeviceName = name,
-                        message = "Device '$name' (index $idx) set to value '$effVal' and verified after 1 retry.",
+                        message = "Device '$name' (index $idx) set to value '$effVal' and verified after 1 retry (${waitMs}ms).",
                         allDevicesDump = devicesDump
                     )
                 }
@@ -950,7 +957,8 @@ class WebMacroEngine(private val context: Context) {
         username: String = "admin",
         plainPassword: String,
         deviceName: String,
-        enableRule: Boolean
+        enableRule: Boolean,
+        stepDelayMs: Long = 2000L
     ): IndexedRadioResult {
         val targetValue = if (enableRule) "1" else "0"
         val loaded = loadUrl(baseUrl, 15000L)
@@ -1022,12 +1030,14 @@ class WebMacroEngine(private val context: Context) {
                 return 'none';
             })();
         """.trimIndent()
+        val waitMs = stepDelayMs.coerceAtLeast(2000L)
         val jumpRes = evalJs(jumpJs) ?: ""
         if (jumpRes.contains("clicked_mmInternet")) {
-            delay(800)
-            clickElement(listOf("[id='smParentCtrl']"), listOf("Parental Control", "التحكم الأبوي"), 8000L)
+            delay(waitMs)
+            clickElement(listOf("[id='smParentCtrl']"), listOf("Parental Control", "التحكم الأبوي"), 10000L)
+            delay(waitMs)
         } else {
-            delay(1200)
+            delay(waitMs)
         }
 
         // Now run the indexed device scanner & toggle (which triggers the router's own jQuery `.change()` -> `dataPost('InstSwitch', ...)`)
@@ -1038,9 +1048,11 @@ class WebMacroEngine(private val context: Context) {
             indexEnd = 10,
             deviceName = deviceName,
             targetValue = targetValue,
-            timeoutMs = 12000L
+            timeoutMs = 15000L,
+            settleDelayMs = waitMs
         )
 
+        delay(1000L)
         logoutQuietly()
         return res
     }

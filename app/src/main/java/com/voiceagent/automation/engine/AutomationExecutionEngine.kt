@@ -491,7 +491,8 @@ object AutomationExecutionEngine {
                     indexEnd = step.indexRangeEnd,
                     deviceName = deviceName,
                     targetValue = targetVal,
-                    timeoutMs = timeoutMs
+                    timeoutMs = timeoutMs,
+                    settleDelayMs = step.delayAfterMs.coerceAtLeast(2000L)
                 )
                 if (!indexedRes.success) {
                     val snapPath = webEngine.saveDomSnapshot(step.title)
@@ -527,7 +528,8 @@ object AutomationExecutionEngine {
                         indexEnd = step.indexRangeEnd,
                         deviceName = deviceName,
                         targetValue = targetVal,
-                        timeoutMs = timeoutMs
+                        timeoutMs = timeoutMs,
+                        settleDelayMs = step.delayAfterMs.coerceAtLeast(2000L)
                     )
                     if (!indexedRes.success) {
                         val snapPath = webEngine.saveDomSnapshot(step.title)
@@ -1348,7 +1350,8 @@ object AutomationExecutionEngine {
                                 username = routerUsername,
                                 plainPassword = plainPassword,
                                 deviceName = deviceName,
-                                enableRule = enableRule
+                                enableRule = enableRule,
+                                stepDelayMs = (radioStep?.delayAfterMs ?: 2000L).coerceAtLeast(2000L)
                             )
                             if (bridgeRes.success) {
                                 completedCount = totalLogicalSteps
@@ -1465,10 +1468,11 @@ object AutomationExecutionEngine {
                     try {
                         val bridgeRes = bridgeEngine.executeZteNativeJsBridge(
                             baseUrl = baseUrl,
-                            username = "admin",
+                            username = routerUsername,
                             plainPassword = plainPassword,
                             deviceName = deviceName,
-                            enableRule = enableRule
+                            enableRule = enableRule,
+                            stepDelayMs = (radioStep?.delayAfterMs ?: 2000L).coerceAtLeast(2000L)
                         )
                         if (bridgeRes.success) {
                             bridgeRecovered = true

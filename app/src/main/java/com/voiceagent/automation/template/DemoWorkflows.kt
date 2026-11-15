@@ -85,8 +85,8 @@ object DemoWorkflows {
                     candidateTexts = listOf("Login", "Log in", "تسجيل الدخول", "دخول"),
                     waitAfterNavigationSelector = "[id='mmInternet']",
                     maxRetries = 2,
-                    timeoutSeconds = 10,
-                    delayAfterMs = 500,
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2000,
                     spokenMessage = "Logging into router"
                 ),
                 AutomationStep(
@@ -100,8 +100,8 @@ object DemoWorkflows {
                     selectorText = "Internet",
                     candidateTexts = listOf("Internet", "الإنترنت", "الانترنت"),
                     waitAfterNavigationSelector = "[id='smParentCtrl']",
-                    timeoutSeconds = 10,
-                    delayAfterMs = 400
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2000
                 ),
                 AutomationStep(
                     order = 6,
@@ -114,13 +114,13 @@ object DemoWorkflows {
                     selectorText = "Parental Control",
                     candidateTexts = listOf("Parental Control", "Parental Controls", "التحكم الأبوي"),
                     waitAfterNavigationSelector = "[id='instName_ParentCtrl:0']",
-                    timeoutSeconds = 10,
-                    delayAfterMs = 400
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2000
                 ),
                 AutomationStep(
                     order = 7,
                     title = "Set Parental Control Rule for $deviceName (OFF / Unblock)",
-                    description = "Scans instName_ParentCtrl:0..10 for '$deviceName', clicks Enable:ParentCtrl:{index} radio (value '0'), and verifies after 1.5s",
+                    description = "Scans instName_ParentCtrl:0..10 for '$deviceName', clicks Enable:ParentCtrl:{index} radio (value '0'), and verifies after 2s",
                     actionType = ActionType.SET_INDEXED_RADIO,
                     isWebStep = true,
                     rowContextText = deviceName,
@@ -131,8 +131,8 @@ object DemoWorkflows {
                     indexRangeEnd = 10,
                     targetRadioValue = "0",
                     maxRetries = 1,
-                    timeoutSeconds = 12,
-                    delayAfterMs = 500,
+                    timeoutSeconds = 15,
+                    delayAfterMs = 2000,
                     spokenMessage = "Enabling internet for $deviceName"
                 ),
                 AutomationStep(
@@ -230,8 +230,8 @@ object DemoWorkflows {
                     candidateTexts = listOf("Login", "Log in", "تسجيل الدخول", "دخول"),
                     waitAfterNavigationSelector = "[id='mmInternet']",
                     maxRetries = 2,
-                    timeoutSeconds = 10,
-                    delayAfterMs = 500,
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2000,
                     spokenMessage = "Logging into router"
                 ),
                 AutomationStep(
@@ -245,8 +245,8 @@ object DemoWorkflows {
                     selectorText = "Internet",
                     candidateTexts = listOf("Internet", "الإنترنت", "الانترنت"),
                     waitAfterNavigationSelector = "[id='smParentCtrl']",
-                    timeoutSeconds = 10,
-                    delayAfterMs = 400
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2000
                 ),
                 AutomationStep(
                     order = 6,
@@ -259,13 +259,13 @@ object DemoWorkflows {
                     selectorText = "Parental Control",
                     candidateTexts = listOf("Parental Control", "Parental Controls", "التحكم الأبوي"),
                     waitAfterNavigationSelector = "[id='instName_ParentCtrl:0']",
-                    timeoutSeconds = 10,
-                    delayAfterMs = 400
+                    timeoutSeconds = 12,
+                    delayAfterMs = 2000
                 ),
                 AutomationStep(
                     order = 7,
                     title = "Set Parental Control Rule for $deviceName (ON / Block)",
-                    description = "Scans instName_ParentCtrl:0..10 for '$deviceName', clicks Enable:ParentCtrl:{index} radio (value '1'), and verifies after 1.5s",
+                    description = "Scans instName_ParentCtrl:0..10 for '$deviceName', clicks Enable:ParentCtrl:{index} radio (value '1'), and verifies after 2s",
                     actionType = ActionType.SET_INDEXED_RADIO,
                     isWebStep = true,
                     rowContextText = deviceName,
@@ -276,8 +276,8 @@ object DemoWorkflows {
                     indexRangeEnd = 10,
                     targetRadioValue = "1",
                     maxRetries = 1,
-                    timeoutSeconds = 12,
-                    delayAfterMs = 500,
+                    timeoutSeconds = 15,
+                    delayAfterMs = 2000,
                     spokenMessage = "Blocking internet for $deviceName"
                 ),
                 AutomationStep(

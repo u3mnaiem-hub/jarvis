@@ -38,9 +38,10 @@ class VoiceAgentApp : Application() {
                         ?: "Smart-TV"
                     val enableTvWorkflow = DemoWorkflows.createEnableTvInternetWorkflow(deviceName = customDevice)
                     val disableTvWorkflow = DemoWorkflows.createDisableTvInternetWorkflow(deviceName = customDevice)
-                    db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow))
+                    val deviceWorkflows = DemoWorkflows.getDeviceRouterWorkflows()
+                    db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow) + deviceWorkflows)
                     prefs.edit().putInt("router_workflows_version", ROUTER_WORKFLOWS_VERSION).apply()
-                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows (v$ROUTER_WORKFLOWS_VERSION) for device: $customDevice")
+                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows (v$ROUTER_WORKFLOWS_VERSION) for device: $customDevice + 4 target devices")
                 }
 
                 // Check router credential seed
@@ -66,7 +67,7 @@ class VoiceAgentApp : Application() {
 
     companion object {
         /** Bump to force re-seeding of the built-in router workflows on next app start. */
-        private const val ROUTER_WORKFLOWS_VERSION = 3
+        private const val ROUTER_WORKFLOWS_VERSION = 4
 
         lateinit var instance: VoiceAgentApp
             private set

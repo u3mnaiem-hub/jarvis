@@ -21,6 +21,31 @@ object AutomationRecorderEngine {
     @Volatile
     private var lastStepTimestampMs: Long = 0L
 
+    /** Creation time of every recorded step (keyed by step id). Used to trim steps right before an overlay stop tap. */
+    private val stepCreatedAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Name / voice phrase currently typed in the Recorder screen, so that a macro stopped from the
+     * floating overlay button (without returning to Jarvis) can be saved with the user's chosen metadata.
+     */
+    @Volatile
+    var pendingWorkflowName: String = ""
+        private set
+
+    @Volatile
+    var pendingWorkflowNameAr: String = ""
+        private set
+
+    @Volatile
+    var pendingVoicePhrase: String = ""
+        private set
+
+    fun updatePendingMetadata(name: String, nameAr: String, voicePhrase: String) {
+        pendingWorkflowName = name
+        pendingWorkflowNameAr = nameAr
+        pendingVoicePhrase = voicePhrase
+    }
+
     val isRecording: Boolean
         get() = _isRecordingFlow.value
 
@@ -33,6 +58,7 @@ object AutomationRecorderEngine {
     fun startRecording(initialTitle: String = "Recorded Automation") {
         Log.i(TAG, "Starting automation recorder: $initialTitle")
         _recordedStepsFlow.value = emptyList()
+        stepCreatedAtMs.clear()
         _isPausedFlow.value = false
         _isRecordingFlow.value = true
     }
@@ -62,6 +88,53 @@ object AutomationRecorderEngine {
         _isRecordingFlow.value = false
         _isPausedFlow.value = false
         _recordedStepsFlow.value = emptyList()
+        stepCreatedAtMs.clear()
+    }
+
+    /**
+     * Safety net applied when the recording is stopped from the floating overlay button:
+     *  - drops every trailing step created within [trailingWindowMs] before the stop tap,
+     *  - drops any step targeting the overlay (view id / content description),
+     *  - drops trailing steps that would end the macro inside Jarvis' own UI (only when the macro
+     *    also contains steps in other apps, so pure in-app-browser recordings are preserved).
+     * Returns the re-indexed list and publishes it as the current recorded steps.
+     */
+    fun sanitizeStepsForOverlayStop(
+        steps: List<AutomationStep>,
+        stopTapTimeMs: Long,
+        ownPackage: String,
+        overlayViewIdSuffix: String,
+        overlayContentDescription: String,
+        trailingWindowMs: Long = 500L
+    ): List<AutomationStep> {
+        val result = steps.filterNot { s ->
+            (s.selectorResourceId?.endsWith(overlayViewIdSuffix) == true) ||
+                (s.selectorContentDescription == overlayContentDescription) ||
+                (s.selectorText == overlayContentDescription)
+        }.toMutableList()
+
+        val cutoff = stopTapTimeMs - trailingWindowMs
+        while (result.isNotEmpty()) {
+            val createdAt = stepCreatedAtMs[result.last().id] ?: break
+            if (createdAt >= cutoff) {
+                Log.d(TAG, "Overlay stop: dropping trailing step '${result.last().title}' (${stopTapTimeMs - createdAt} ms before stop)")
+                result.removeAt(result.lastIndex)
+            } else {
+                break
+            }
+        }
+
+        if (result.any { it.targetPackage != null && it.targetPackage != ownPackage }) {
+            while (result.isNotEmpty() && result.last().targetPackage == ownPackage) {
+                Log.d(TAG, "Overlay stop: dropping trailing Jarvis step '${result.last().title}'")
+                result.removeAt(result.lastIndex)
+            }
+        }
+
+        val reindexed = result.mapIndexed { idx, s -> s.copy(order = idx + 1) }
+        _recordedStepsFlow.value = reindexed
+        Log.i(TAG, "Overlay stop: kept ${reindexed.size} of ${steps.size} steps")
+        return reindexed
     }
 
     fun addRecordedStep(step: AutomationStep) {
@@ -106,6 +179,7 @@ object AutomationRecorderEngine {
         }
 
         lastStepTimestampMs = now
+        stepCreatedAtMs[indexedStep.id] = now
         currentList.add(indexedStep)
         _recordedStepsFlow.value = currentList
         Log.d(TAG, "Recorded step #$nextOrder: ${indexedStep.title}")

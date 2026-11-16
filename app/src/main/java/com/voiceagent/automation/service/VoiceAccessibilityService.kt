@@ -2,34 +2,73 @@ package com.voiceagent.automation.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.res.Configuration
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.widget.Toast
+import com.voiceagent.automation.data.db.VoiceAgentDatabase
+import com.voiceagent.automation.engine.AutomationExecutionEngine
 import com.voiceagent.automation.engine.AutomationRecorderEngine
+import com.voiceagent.automation.engine.ExecutionState
 import com.voiceagent.automation.model.ActionType
+import com.voiceagent.automation.model.Automation
 import com.voiceagent.automation.model.AutomationStep
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class VoiceAccessibilityService : AccessibilityService() {
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var overlayScope: CoroutineScope? = null
+    private var recordingOverlay: RecordingOverlayManager? = null
+
+    /**
+     * True from the moment the floating Stop button is tapped until ~300 ms after the overlay is removed.
+     * While true, every accessibility event is ignored so nothing related to stopping gets recorded.
+     */
+    @Volatile
+    private var isStoppingFromOverlay = false
+    private val clearStoppingFlag = Runnable { isStoppingFromOverlay = false }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceConnected.value = true
+        startRecordingOverlayObserver()
         Log.i(TAG, "VoiceAccessibilityService connected successfully")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        stopRecordingOverlayObserver()
         instance = null
         _isServiceConnected.value = false
         Log.i(TAG, "VoiceAccessibilityService unbound")
         return super.onUnbind(intent)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Keep the floating Stop button inside the screen after rotation / resize.
+        recordingOverlay?.onConfigurationChanged()
     }
 
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
@@ -45,7 +84,125 @@ class VoiceAccessibilityService : AccessibilityService() {
         
         // If recording mode is currently active (and not paused), capture user interaction
         if (AutomationRecorderEngine.isRecordingActive) {
+            // Never record anything produced by the floating Stop button (tap, drag or its removal)
+            if (isStoppingFromOverlay) return
+            if (recordingOverlay?.isTouchInProgress == true) return
+            if (isRecordingOverlayEvent(event)) return
             handleRecordingEvent(event)
+        }
+    }
+
+    // ==========================================
+    // Floating "Stop Recording" overlay
+    // ==========================================
+
+    /** Shows the overlay only while a recording is active and no macro playback is running. */
+    private fun startRecordingOverlayObserver() {
+        stopRecordingOverlayObserver()
+        val overlay = RecordingOverlayManager(this) { tapDownTimeMs -> onOverlayStopTapped(tapDownTimeMs) }
+        recordingOverlay = overlay
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        overlayScope = scope
+        scope.launch {
+            combine(
+                AutomationRecorderEngine.isRecordingFlow,
+                AutomationExecutionEngine.executionState
+            ) { isRecording, execState ->
+                isRecording && execState !is ExecutionState.Running
+            }
+                .distinctUntilChanged()
+                .collect { shouldShow ->
+                    if (shouldShow) overlay.show() else overlay.hide()
+                }
+        }
+    }
+
+    private fun stopRecordingOverlayObserver() {
+        overlayScope?.cancel()
+        overlayScope = null
+        val overlay = recordingOverlay
+        recordingOverlay = null
+        if (overlay != null) {
+            if (Looper.myLooper() == Looper.getMainLooper()) overlay.hide() else mainHandler.post { overlay.hide() }
+        }
+    }
+
+    private fun isRecordingOverlayEvent(event: AccessibilityEvent): Boolean {
+        val overlayWindowId = recordingOverlay?.overlayWindowId ?: RecordingOverlayManager.NO_WINDOW_ID
+        if (overlayWindowId != RecordingOverlayManager.NO_WINDOW_ID && event.windowId == overlayWindowId) return true
+
+        val source = event.source ?: return false
+        if (overlayWindowId != RecordingOverlayManager.NO_WINDOW_ID && source.windowId == overlayWindowId) return true
+        if (RecordingOverlayManager.isOverlayNode(source)) return true
+        if (RecordingOverlayManager.isOverlayContentDescription(event.contentDescription)) return true
+
+        if (event.packageName?.toString() == applicationContext.packageName) {
+            val window = try { source.window } catch (_: Exception) { null }
+            if (window?.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) return true
+        }
+        return false
+    }
+
+    /** Single tap on the floating button: stop + save the macro while staying on the current app. */
+    private fun onOverlayStopTapped(tapDownTimeMs: Long) {
+        if (isStoppingFromOverlay) return
+        isStoppingFromOverlay = true
+        mainHandler.removeCallbacks(clearStoppingFlag)
+
+        if (!AutomationRecorderEngine.isRecording) {
+            recordingOverlay?.hide()
+            mainHandler.postDelayed(clearStoppingFlag, OVERLAY_STOP_GRACE_MS)
+            return
+        }
+
+        val ownPackage = applicationContext.packageName
+        val rawSteps = AutomationRecorderEngine.stopRecording()
+        val cleanedSteps = AutomationRecorderEngine.sanitizeStepsForOverlayStop(
+            steps = rawSteps,
+            stopTapTimeMs = tapDownTimeMs,
+            ownPackage = ownPackage,
+            overlayViewIdSuffix = RecordingOverlayManager.OVERLAY_VIEW_ID_SUFFIX,
+            overlayContentDescription = RecordingOverlayManager.OVERLAY_CONTENT_DESCRIPTION
+        )
+
+        recordingOverlay?.hide()
+        mainHandler.postDelayed(clearStoppingFlag, OVERLAY_STOP_GRACE_MS)
+
+        if (cleanedSteps.isEmpty()) {
+            AutomationRecorderEngine.cancelRecording()
+            Toast.makeText(applicationContext, "No steps recorded – nothing saved", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val name = AutomationRecorderEngine.pendingWorkflowName.trim().ifBlank {
+            "Macro " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
+        }
+        val nameAr = AutomationRecorderEngine.pendingWorkflowNameAr.trim().ifBlank { name }
+        val phrase = AutomationRecorderEngine.pendingVoicePhrase.trim()
+        val automation = Automation(
+            name = name,
+            nameAr = nameAr,
+            voicePhrases = if (phrase.isNotBlank()) listOf(phrase) else emptyList(),
+            steps = cleanedSteps
+        )
+        val appContext = applicationContext
+
+        // Save in the background; never start any Jarvis activity so the user stays on the current app.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                VoiceAgentDatabase.getInstance(appContext).automationDao().insertOrUpdate(automation)
+                AutomationRecorderEngine.cancelRecording()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, "Macro saved", Toast.LENGTH_SHORT).show()
+                }
+                Log.i(TAG, "Macro '${automation.name}' saved from overlay with ${cleanedSteps.size} steps")
+            } catch (e: Exception) {
+                // Keep the (stopped) steps in the recorder so the user can still save from the in-app screen.
+                Log.e(TAG, "Failed to save macro from overlay: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, "Failed to save macro", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -201,6 +358,8 @@ class VoiceAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        stopRecordingOverlayObserver()
+        mainHandler.removeCallbacks(clearStoppingFlag)
         super.onDestroy()
         instance = null
         _isServiceConnected.value = false
@@ -542,6 +701,7 @@ class VoiceAccessibilityService : AccessibilityService() {
 
     companion object {
         const val TAG = "VoiceAccessibility"
+        private const val OVERLAY_STOP_GRACE_MS = 300L
         var instance: VoiceAccessibilityService? = null
         
         private val _isServiceConnected = MutableStateFlow(false)

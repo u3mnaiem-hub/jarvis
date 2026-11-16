@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Floating "Stop Recording" button drawn by VoiceAccessibilityService as a
+    TYPE_ACCESSIBILITY_OVERLAY window while a macro recording is active.
+
+    - importantForAccessibility="no" so it is not exposed as an interactive node.
+    - Not clickable / not focusable: the tap is handled by an OnTouchListener,
+      so no TYPE_VIEW_CLICKED event is ever produced for it.
+    - The unique view id + content description (set in code from
+      RecordingOverlayManager.OVERLAY_CONTENT_DESCRIPTION) are used by the
+      recorder to identify and drop any event that belongs to this overlay.
+-->
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/jarvis_overlay_stop_button"
+    android:layout_width="48dp"
+    android:layout_height="48dp"
+    android:alpha="0.85"
+    android:background="@drawable/overlay_stop_bg"
+    android:clickable="false"
+    android:focusable="false"
+    android:importantForAccessibility="no"
+    android:longClickable="false"
+    android:scaleType="center"
+    android:soundEffectsEnabled="false"
+    android:src="@drawable/ic_overlay_stop_square" />

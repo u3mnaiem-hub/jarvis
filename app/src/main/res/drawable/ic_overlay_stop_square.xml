@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Red "stop" square used inside the floating Stop Recording overlay button. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFE53935" />
+    <corners android:radius="3dp" />
+    <size
+        android:width="18dp"
+        android:height="18dp" />
+</shape>

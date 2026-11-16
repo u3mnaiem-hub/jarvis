@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Background of the floating "Stop Recording" overlay button (semi-transparent dark circle). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#B3212121" />
+    <stroke
+        android:width="2dp"
+        android:color="#99FFFFFF" />
+</shape>

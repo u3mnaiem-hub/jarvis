@@ -50,6 +50,12 @@ fun RecorderScreen(
     var workflowNameAr by rememberSaveable { mutableStateOf("") }
     var voicePhrase by rememberSaveable { mutableStateOf("") }
 
+    // Share the typed name / voice phrase with the recorder so the floating overlay Stop button
+    // can save the macro with them without bringing Jarvis back to the foreground.
+    LaunchedEffect(workflowName, workflowNameAr, voicePhrase) {
+        AutomationRecorderEngine.updatePendingMetadata(workflowName, workflowNameAr, voicePhrase)
+    }
+
     var isManualStepDialogVisible by remember { mutableStateOf(false) }
 
     Scaffold(

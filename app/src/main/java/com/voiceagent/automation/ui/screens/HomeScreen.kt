@@ -158,96 +158,330 @@ fun HomeScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(GlassBgTop, GlassBgMid, GlassBgBottom)
+                )
+            )
             .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        contentPadding = PaddingValues(top = 16.dp, bottom = 90.dp)
+        contentPadding = PaddingValues(top = 12.dp, bottom = 90.dp)
     ) {
-        // Banking Protection & Accessibility Control Card
+        // 1. Compact Banking Protection & Accessibility Control Bar
         item {
-            Card(
+            GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = 10.dp)
                     .clickable { onNavigateToBankingProtection() },
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
-                border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f))
+                cornerRadius = 16.dp,
+                borderColor = Emerald500.copy(alpha = 0.45f)
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
-                            .shadow(4.dp, CircleShape)
+                            .size(28.dp)
                             .clip(CircleShape)
                             .background(Brush.linearGradient(listOf(Emerald500, Emerald700))),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "حماية البنوك وإنستاباي نشطة",
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 13.5.sp
+                        Text(
+                            text = "حماية البنوك وإنستاباي",
+                            fontWeight = FontWeight.Bold,
+                            color = LightTextPrimary,
+                            fontSize = 12.5.sp
+                        )
+                        Text(
+                            text = if (isServiceConnected) "Accessibility مفعّل" else "آمن (متوقف)",
+                            color = if (isServiceConnected) Red600 else Emerald700,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Surface(
+                        onClick = {
+                            if (isServiceConnected) {
+                                AccessibilityControlHelper.disableNow(context)
+                            } else {
+                                AccessibilityControlHelper.enableOrOpenSettings(context)
+                            }
+                        },
+                        color = if (isServiceConnected) Red500.copy(alpha = 0.14f) else Emerald500.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (isServiceConnected) Red500.copy(alpha = 0.4f) else Emerald500.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isServiceConnected) Icons.Default.PowerSettingsNew else Icons.Default.AccessibilityNew,
+                                contentDescription = null,
+                                tint = if (isServiceConnected) Red600 else Emerald700,
+                                modifier = Modifier.size(13.dp)
                             )
-                            Surface(color = Emerald500.copy(alpha = 0.16f), shape = RoundedCornerShape(6.dp)) {
-                                Text("Safe Mode", color = Emerald600, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            Text(
+                                text = if (isServiceConnected) "إيقاف" else "تفعيل",
+                                color = if (isServiceConnected) Red600 else Emerald700,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. ZTE H188 Router Full Control Card (Top of Screen after Banking Protection)
+        item {
+            var routerStatusText by remember { mutableStateOf<String?>(null) }
+            var routerDevices by remember {
+                mutableStateOf<List<com.voiceagent.automation.engine.ZteRouterHttpClient.ParentalControlDevice>>(emptyList())
+            }
+            var isRouterBusy by remember { mutableStateOf(false) }
+            var showRouterCredDialog by remember { mutableStateOf(false) }
+            val prefs = remember { context.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE) }
+            var routerUserDraft by remember { mutableStateOf(prefs.getString("router_admin_user", "admin") ?: "admin") }
+            var routerPassDraft by remember { mutableStateOf("") }
+
+            fun triggerQuickRouterMacro(deviceName: String, radioVal: String) {
+                val label = if (radioVal == "0") "تشغيل النت: $deviceName" else "قفل النت: $deviceName"
+                val quickAuto = Automation(
+                    name = label,
+                    nameAr = label,
+                    description = "ZTE H188 Hybrid HTTP + Native JS Macro for $deviceName",
+                    voicePhrases = listOf(label),
+                    steps = listOf(
+                        com.voiceagent.automation.model.AutomationStep(
+                            order = 1,
+                            title = "Open Router 192.168.1.1",
+                            actionType = com.voiceagent.automation.model.ActionType.OPEN_URL,
+                            isWebStep = true,
+                            url = "https://192.168.1.1/"
+                        ),
+                        com.voiceagent.automation.model.AutomationStep(
+                            order = 2,
+                            title = "Toggle $deviceName -> $radioVal",
+                            actionType = com.voiceagent.automation.model.ActionType.SET_INDEXED_RADIO,
+                            isWebStep = true,
+                            rowContextText = deviceName,
+                            selectorResourceId = "instName_ParentCtrl:{i}",
+                            selectorText = deviceName,
+                            indexedNamePattern = "[id='instName_ParentCtrl:{index}']",
+                            indexedTargetPattern = "input[type='radio'][id='Enable:ParentCtrl:{index}']",
+                            targetRadioValue = radioVal,
+                            textPayload = "Enable:ParentCtrl:{i}|$radioVal"
+                        )
+                    )
+                )
+                AutomationExecutionEngine.executeAutomation(context, quickAuto)
+            }
+
+            if (showRouterCredDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRouterCredDialog = false },
+                    title = {
+                        Text("إعداد بيانات دخول الراوتر (ZTE H188A)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "تُحفظ البيانات مشفرة محلياً على هاتفك فقط لاستخدامها في الدخول التلقائي للراوتر.",
+                                fontSize = 11.5.sp,
+                                color = LightTextSecondary
+                            )
+                            OutlinedTextField(
+                                value = routerUserDraft,
+                                onValueChange = { routerUserDraft = it },
+                                label = { Text("اسم المستخدم (Username)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = routerPassDraft,
+                                onValueChange = { routerPassDraft = it },
+                                label = { Text("كلمة المرور (Password)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (routerPassDraft.isNotBlank()) {
+                                    val cleanUser = routerUserDraft.trim().ifBlank { "admin" }
+                                    prefs.edit().putString("router_admin_user", cleanUser).apply()
+                                    val passToSave = routerPassDraft
+                                    coroutineScope.launch {
+                                        val enc = com.voiceagent.automation.security.KeystoreManager.encrypt(passToSave)
+                                        db.credentialDao().insertOrUpdate(
+                                            com.voiceagent.automation.model.Credential(
+                                                key = "router_admin_pass",
+                                                label = "ZTE Router Admin Password",
+                                                encryptedData = enc.encryptedBase64,
+                                                iv = enc.ivBase64
+                                            )
+                                        )
+                                        db.credentialDao().insertOrUpdate(
+                                            com.voiceagent.automation.model.Credential(
+                                                key = "router_password",
+                                                label = "Router Password",
+                                                encryptedData = enc.encryptedBase64,
+                                                iv = enc.ivBase64
+                                            )
+                                        )
+                                        routerStatusText = "تم حفظ بيانات دخول الراوتر ($cleanUser) بنجاح!"
+                                    }
+                                    routerPassDraft = ""
+                                    showRouterCredDialog = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                        ) {
+                            Text("حفظ مشفر")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRouterCredDialog = false }) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
+            }
+
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Router, contentDescription = null, tint = Emerald600)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "تحكم كامل في الراوتر (ZTE H188)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.5.sp,
+                                    color = LightTextPrimary
+                                )
+                                Text(
+                                    text = "بروتوكول HTTP مباشر + جسر JavaScript",
+                                    fontSize = 11.sp,
+                                    color = LightTextSecondary
+                                )
                             }
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (isServiceConnected) {
-                                "الـ Accessibility مفعّل الآن • يُغلق تلقائياً عند الخروج"
-                            } else {
-                                "الـ Accessibility متوقف حالياً (آمن لتطبيقات البنوك)"
-                            },
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
-                            fontSize = 11.sp
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Surface(
-                                onClick = {
-                                    if (isServiceConnected) {
-                                        AccessibilityControlHelper.disableNow(context)
-                                    } else {
-                                        AccessibilityControlHelper.enableOrOpenSettings(context)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                if (!isRouterBusy) {
+                                    isRouterBusy = true
+                                    routerStatusText = "جاري الاتصال بالراوتر 192.168.1.1 وفحص التوكن..."
+                                    coroutineScope.launch {
+                                        try {
+                                            val (client, loginRes) = AutomationExecutionEngine.loginToZteRouter(db)
+                                            when (loginRes) {
+                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Success -> {
+                                                    val (_, devices) = client.fetchParentalControlDevices()
+                                                    client.logout()
+                                                    routerDevices = devices
+                                                    routerStatusText = if (devices.isNotEmpty()) {
+                                                        "تم الدخول بنجاح! تم العثور على ${devices.size} قاعدة في Parental Control."
+                                                    } else {
+                                                        "تم الدخول للراوتر بنجاح!"
+                                                    }
+                                                }
+                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Failure -> {
+                                                    routerStatusText = "نتيجة الفحص: ${loginRes.message}"
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            routerStatusText = "خطأ أثناء الفحص: ${e.message}"
+                                        } finally {
+                                            isRouterBusy = false
+                                        }
                                     }
-                                },
-                                color = if (isServiceConnected) Red500.copy(alpha = 0.14f) else Emerald500.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, if (isServiceConnected) Red500.copy(alpha = 0.4f) else Emerald500.copy(alpha = 0.4f))
+                                }
+                            },
+                            enabled = !isRouterBusy,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            if (isRouterBusy) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text("فحص الأجهزة", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { showRouterCredDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp), tint = Amber600)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("إعداد / حفظ يوزر وباسورد الراوتر للدخول التلقائي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (routerStatusText != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = routerStatusText!!,
+                            fontSize = 11.5.sp,
+                            color = LightTextPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (routerDevices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        routerDevices.forEach { dev ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isServiceConnected) Icons.Default.PowerSettingsNew else Icons.Default.AccessibilityNew,
-                                        contentDescription = null,
-                                        tint = if (isServiceConnected) Red600 else Emerald600,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = if (isServiceConnected) "إيقاف الـ Accessibility الآن" else "تفعيل الـ Accessibility",
-                                        color = if (isServiceConnected) Red600 else Emerald600,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                Text(
+                                    text = "#${dev.index}: ${dev.name} (${if (dev.currentEnable == "1") "مقفل" else "مفتوح"})",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    TextButton(onClick = { triggerQuickRouterMacro(dev.name, "0") }) {
+                                        Text("تشغيل", color = Emerald600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    TextButton(onClick = { triggerQuickRouterMacro(dev.name, "1") }) {
+                                        Text("قفل", color = Red600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
                     }
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
             }
         }
@@ -466,19 +700,18 @@ fun HomeScreen(
         // Voice Command Match Card
         item {
             AnimatedVisibility(visible = matchConfidenceText != null) {
-                Card(
+                GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    shape = RoundedCornerShape(14.dp)
+                    cornerRadius = 16.dp
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = matchConfidenceText ?: "",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = LightTextPrimary
                         )
                         if (matchedAutomation != null) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -517,9 +750,7 @@ fun HomeScreen(
                                         Text(
                                             text = candidate.nameAr.ifBlank { candidate.name },
                                             fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            fontWeight = FontWeight.SemiBold
                                         )
                                     }
                                 }
@@ -530,7 +761,7 @@ fun HomeScreen(
             }
         }
 
-        // Favorite Quick Automations
+        // Built-in / Favorite Quick Automations (Vertical, Equal Width, Full Text Visible)
         val favoriteList = automations.filter { it.isFavorite }
         if (favoriteList.isNotEmpty()) {
             item {
@@ -540,83 +771,84 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "المهام المفضلة (Favorites)",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        text = "الأوامر والمهام الجاهزة",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LightTextPrimary
                     )
                     TextButton(onClick = onNavigateToMyAutomations) {
-                        Text("عرض الكل (${automations.size})", fontSize = 12.sp, color = Emerald600)
+                        Text("عرض الكل (${automations.size})", fontSize = 12.sp, color = Emerald600, fontWeight = FontWeight.Bold)
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
             }
 
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+            items(favoriteList) { auto ->
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 92.dp)
+                        .padding(bottom = 10.dp)
+                        .clickable {
+                            AutomationExecutionEngine.executeAutomation(context, auto)
+                        }
                 ) {
-                    items(favoriteList) { auto ->
-                        Card(
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
                             modifier = Modifier
-                                .width(220.dp)
-                                .clickable {
-                                    AutomationExecutionEngine.executeAutomation(context, auto)
-                                },
-                            shape = RoundedCornerShape(20.dp),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Emerald100),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Emerald100),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(Icons.Default.Bolt, contentDescription = null, tint = Emerald600)
-                                    }
-                                    Badge(containerColor = Emerald100) {
-                                        Text("${auto.steps.size} خطوات", color = Emerald600, fontSize = 10.sp)
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(10.dp))
+                            Icon(Icons.Default.Bolt, contentDescription = null, tint = Emerald600)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = auto.nameAr.ifBlank { auto.name },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = LightTextPrimary
+                            )
+                            if (auto.description.isNotBlank() || (auto.name.isNotBlank() && auto.name != auto.nameAr)) {
+                                Spacer(modifier = Modifier.height(3.dp))
                                 Text(
-                                    text = auto.name,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = auto.nameAr.ifBlank { auto.description },
+                                    text = auto.description.ifBlank { auto.name },
                                     fontSize = 11.5.sp,
-                                    color = LightTextSecondary,
-                                    maxLines = 2
+                                    color = LightTextSecondary
                                 )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Button(
-                                    onClick = { AutomationExecutionEngine.executeAutomation(context, auto) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                                    contentPadding = PaddingValues(vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("تشغيل (Run)", fontSize = 12.sp)
-                                }
                             }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${auto.steps.size} خطوات",
+                                color = Emerald700,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Button(
+                            onClick = { AutomationExecutionEngine.executeAutomation(context, auto) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("تشغيل", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(20.dp))
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
             }
         }
 
@@ -639,12 +871,11 @@ fun HomeScreen(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Card(
+                GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (latestLog!!.isSuccess) Emerald100 else Red100
-                    )
+                    cornerRadius = 16.dp,
+                    containerColor = if (latestLog!!.isSuccess) Emerald50.copy(alpha = 0.82f) else Rose50.copy(alpha = 0.85f),
+                    borderColor = if (latestLog!!.isSuccess) Emerald500.copy(alpha = 0.4f) else Red500.copy(alpha = 0.4f)
                 ) {
                     Row(
                         modifier = Modifier.padding(14.dp),
@@ -694,280 +925,7 @@ fun HomeScreen(
             }
         }
 
-        // ZTE H188 Router Quick Control & Live Diagnostic Card
-        item {
-            var routerStatusText by remember { mutableStateOf<String?>(null) }
-            var routerDevices by remember {
-                mutableStateOf<List<com.voiceagent.automation.engine.ZteRouterHttpClient.ParentalControlDevice>>(emptyList())
-            }
-            var isRouterBusy by remember { mutableStateOf(false) }
-            var showRouterCredDialog by remember { mutableStateOf(false) }
-            val prefs = remember { context.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE) }
-            var routerUserDraft by remember { mutableStateOf(prefs.getString("router_admin_user", "admin") ?: "admin") }
-            var routerPassDraft by remember { mutableStateOf("") }
-
-            fun triggerQuickRouterMacro(deviceName: String, radioVal: String) {
-                val label = if (radioVal == "0") "تشغيل النت: $deviceName" else "قفل النت: $deviceName"
-                val quickAuto = Automation(
-                    name = label,
-                    nameAr = label,
-                    description = "ZTE H188 Hybrid HTTP + Native JS Macro for $deviceName",
-                    voicePhrases = listOf(label),
-                    steps = listOf(
-                        com.voiceagent.automation.model.AutomationStep(
-                            order = 1,
-                            title = "Open Router 192.168.1.1",
-                            actionType = com.voiceagent.automation.model.ActionType.OPEN_URL,
-                            isWebStep = true,
-                            url = "https://192.168.1.1/"
-                        ),
-                        com.voiceagent.automation.model.AutomationStep(
-                            order = 2,
-                            title = "Toggle $deviceName -> $radioVal",
-                            actionType = com.voiceagent.automation.model.ActionType.SET_INDEXED_RADIO,
-                            isWebStep = true,
-                            rowContextText = deviceName,
-                            selectorResourceId = "instName_ParentCtrl:{i}",
-                            selectorText = deviceName,
-                            indexedNamePattern = "[id='instName_ParentCtrl:{index}']",
-                            indexedTargetPattern = "input[type='radio'][id='Enable:ParentCtrl:{index}']",
-                            targetRadioValue = radioVal,
-                            textPayload = "Enable:ParentCtrl:{i}|$radioVal"
-                        )
-                    )
-                )
-                AutomationExecutionEngine.executeAutomation(context, quickAuto)
-            }
-
-            if (showRouterCredDialog) {
-                AlertDialog(
-                    onDismissRequest = { showRouterCredDialog = false },
-                    title = {
-                        Text("إعداد بيانات دخول الراوتر (ZTE H188A)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                "تُحفظ البيانات مشفرة محلياً على هاتفك فقط لاستخدامها في الدخول التلقائي للراوتر.",
-                                fontSize = 11.5.sp,
-                                color = LightTextSecondary
-                            )
-                            OutlinedTextField(
-                                value = routerUserDraft,
-                                onValueChange = { routerUserDraft = it },
-                                label = { Text("اسم المستخدم (Username)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = routerPassDraft,
-                                onValueChange = { routerPassDraft = it },
-                                label = { Text("كلمة المرور (Password)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                if (routerPassDraft.isNotBlank()) {
-                                    val cleanUser = routerUserDraft.trim().ifBlank { "admin" }
-                                    prefs.edit().putString("router_admin_user", cleanUser).apply()
-                                    val passToSave = routerPassDraft
-                                    coroutineScope.launch {
-                                        val enc = com.voiceagent.automation.security.KeystoreManager.encrypt(passToSave)
-                                        db.credentialDao().insertOrUpdate(
-                                            com.voiceagent.automation.model.Credential(
-                                                key = "router_admin_pass",
-                                                label = "ZTE Router Admin Password",
-                                                encryptedData = enc.encryptedBase64,
-                                                iv = enc.ivBase64
-                                            )
-                                        )
-                                        db.credentialDao().insertOrUpdate(
-                                            com.voiceagent.automation.model.Credential(
-                                                key = "router_password",
-                                                label = "Router Password",
-                                                encryptedData = enc.encryptedBase64,
-                                                iv = enc.ivBase64
-                                            )
-                                        )
-                                        routerStatusText = "تم حفظ بيانات دخول الراوتر ($cleanUser) بنجاح!"
-                                    }
-                                    routerPassDraft = ""
-                                    showRouterCredDialog = false
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
-                        ) {
-                            Text("حفظ مشفر")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showRouterCredDialog = false }) {
-                            Text("إلغاء")
-                        }
-                    }
-                )
-            }
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Router, contentDescription = null, tint = Emerald600)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "تحكم مباشر في الراوتر (ZTE H188)",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                                Text(
-                                    text = "بروتوكول HTTP مباشر + جسر JavaScript الأصلي للراوتر",
-                                    fontSize = 11.sp,
-                                    color = LightTextSecondary
-                                )
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                if (!isRouterBusy) {
-                                    isRouterBusy = true
-                                    routerStatusText = "جاري الاتصال بالراوتر 192.168.1.1 وفحص التوكن..."
-                                    coroutineScope.launch {
-                                        try {
-                                            val (client, loginRes) = AutomationExecutionEngine.loginToZteRouter(db)
-                                            when (loginRes) {
-                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Success -> {
-                                                    val (_, devices) = client.fetchParentalControlDevices()
-                                                    client.logout()
-                                                    routerDevices = devices
-                                                    routerStatusText = if (devices.isNotEmpty()) {
-                                                        "تم الدخول بنجاح! تم العثور على ${devices.size} قاعدة في Parental Control."
-                                                    } else {
-                                                        "تم الدخول للراوتر بنجاح! يمكنك تشغيل أو قفل النت من الأزرار بالأسفل."
-                                                    }
-                                                }
-                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Failure -> {
-                                                    routerStatusText = "نتيجة الفحص: ${loginRes.message}"
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            routerStatusText = "خطأ أثناء الفحص: ${e.message}"
-                                        } finally {
-                                            isRouterBusy = false
-                                        }
-                                    }
-                                }
-                            },
-                            enabled = !isRouterBusy,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            if (isRouterBusy) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                            }
-                            Text("فحص الأجهزة", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { showRouterCredDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp), tint = Amber600)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("إعداد / حفظ يوزر وباسورد الراوتر للدخول التلقائي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = { triggerQuickRouterMacro("TV", "0") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
-                        ) {
-                            Icon(Icons.Default.Wifi, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("تشغيل نت التلفزيون", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = { triggerQuickRouterMacro("TV", "1") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Red600),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
-                        ) {
-                            Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("قفل نت التلفزيون", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    if (routerStatusText != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = routerStatusText!!,
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    if (routerDevices.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        routerDevices.forEach { dev ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "#${dev.index}: ${dev.name} (${if (dev.currentEnable == "1") "مقفل" else "مفتوح"})",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    TextButton(onClick = { triggerQuickRouterMacro(dev.name, "0") }) {
-                                        Text("تشغيل", color = Emerald600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    TextButton(onClick = { triggerQuickRouterMacro(dev.name, "1") }) {
-                                        Text("قفل", color = Red600, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Quick Action Buttons (Modern Elevated Pills)
+        // Quick Action Buttons (Modern Elevated Glass Pills)
         item {
             Row(
                 modifier = Modifier
@@ -1001,9 +959,13 @@ fun HomeScreen(
                 }
                 OutlinedButton(
                     onClick = onNavigateToMyAutomations,
-                    modifier = Modifier.weight(1f).height(46.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .shadow(6.dp, RoundedCornerShape(14.dp), ambientColor = GlassShadowColor.copy(alpha = 0.16f)),
                     shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = GlassCardSurface),
+                    border = BorderStroke(1.2.dp, GlassCardBorder),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 ) {
                     Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -1013,4 +975,28 @@ fun HomeScreen(
             }
         }
     }
+}
+
+@Composable
+private fun GlassCard(
+    modifier: Modifier = Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp = 20.dp,
+    containerColor: Color = GlassCardSurface,
+    borderColor: Color = GlassCardBorder,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val shape = RoundedCornerShape(cornerRadius)
+    Card(
+        modifier = modifier.shadow(
+            elevation = 10.dp,
+            shape = shape,
+            ambientColor = GlassShadowColor.copy(alpha = 0.18f),
+            spotColor = GlassShadowColor.copy(alpha = 0.22f)
+        ),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.2.dp, borderColor),
+        content = content
+    )
 }

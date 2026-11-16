@@ -45,18 +45,26 @@ val Slate700 = Color(0xFF334155)
 val Slate800 = Color(0xFF1E293B)
 val Slate900 = Color(0xFF0F172A)
 
-// Dark Theme Surfaces (Modern Deep Slate AI Assistant)
-val DarkBg = Color(0xFF0B1120)
-val DarkSurface = Color(0xFF131C31)
-val DarkSurfaceVariant = Color(0xFF1E293B)
-val DarkBorder = Color(0xFF28354D)
-val DarkTextPrimary = Color(0xFFF8FAFC)
-val DarkTextSecondary = Color(0xFF94A3B8)
+// Light Gray Glassmorphism Surfaces (iPhone-style Frosted Glass)
+val GlassBgTop = Color(0xFFEAEEF5)
+val GlassBgMid = Color(0xFFE0E6EF)
+val GlassBgBottom = Color(0xFFD5DCE8)
+val GlassCardSurface = Color(0xBCFFFFFF)
+val GlassCardBorder = Color(0xD9FFFFFF)
+val GlassShadowColor = Color(0xFF0F172A)
 
-// Light Theme Surfaces (Clean Off-White + Crisp Card Contrast)
-val LightBg = Color(0xFFF3F6FB)
-val LightSurface = Color(0xFFFFFFFF)
-val LightSurfaceVariant = Color(0xFFEFF4FA)
-val LightBorder = Color(0xFFE2E8F0)
+// Light Theme Surfaces (Light Gray Background + Frosted Glass Cards)
+val LightBg = Color(0xFFE2E7F0)
+val LightSurface = Color(0xCCFFFFFF)
+val LightSurfaceVariant = Color(0xFFE9EEF5)
+val LightBorder = Color(0xD9FFFFFF)
 val LightTextPrimary = Color(0xFF0F172A)
 val LightTextSecondary = Color(0xFF475569)
+
+// Keep Dark* aliases mapped to Light Gray Glass palette so system dark mode doesn't revert to dark blue
+val DarkBg = LightBg
+val DarkSurface = LightSurface
+val DarkSurfaceVariant = LightSurfaceVariant
+val DarkBorder = LightBorder
+val DarkTextPrimary = LightTextPrimary
+val DarkTextSecondary = LightTextSecondary

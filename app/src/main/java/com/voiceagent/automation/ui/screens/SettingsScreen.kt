@@ -3,6 +3,7 @@ package com.voiceagent.automation.ui.screens
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -359,6 +361,41 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("استعادة مهمة راوتر التلفزيون (Enable TV Internet)")
                     }
+                }
+            }
+
+            // About the App ("عن التطبيق")
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = RoundedCornerShape(20.dp),
+                        ambientColor = GlassShadowColor.copy(alpha = 0.18f),
+                        spotColor = GlassShadowColor.copy(alpha = 0.22f)
+                    ),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = GlassCardSurface),
+                border = BorderStroke(1.2.dp, GlassCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Emerald600)
+                        Text("عن التطبيق", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = LightTextPrimary)
+                    }
+                    Divider(color = GlassCardBorder)
+                    Text(
+                        text = "المطور: يسري محمود عبدالنعيم",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        color = LightTextPrimary
+                    )
+                    Text(
+                        text = "نسخة مخصصة بالكامل ولا تعمل بشكل كامل على هواتف الآخرين",
+                        fontSize = 12.5.sp,
+                        color = LightTextSecondary,
+                        lineHeight = 18.sp
+                    )
                 }
             }
 

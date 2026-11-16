@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +40,7 @@ import com.voiceagent.automation.engine.AutomationExecutionEngine
 import com.voiceagent.automation.engine.ExecutionState
 import com.voiceagent.automation.model.Automation
 import com.voiceagent.automation.security.SafeModeManager
+import com.voiceagent.automation.service.AccessibilityControlHelper
 import com.voiceagent.automation.service.VoiceAccessibilityService
 import com.voiceagent.automation.ui.theme.*
 import com.voiceagent.automation.voice.CommandMatchingEngine
@@ -111,41 +114,6 @@ fun HomeScreen(
     LaunchedEffect(voiceState) {
         if (voiceState is VoiceState.Success) {
             val spokenText = (voiceState as VoiceState.Success).recognizedText
-            val lower = spokenText.trim().lowercase()
-
-            // Check if spoken command is a direct expense logging command
-            val isFinanceCommand = lower.contains("سجل مصروف") || lower.contains("سجل مصاريف") ||
-                    lower.contains("أضف مصروف") || lower.contains("اضف مصروف") ||
-                    (lower.startsWith("سجل ") && (lower.contains("جنيه") || lower.any { it.isDigit() }))
-
-            if (isFinanceCommand) {
-                val regex = Regex("(\\d+(?:\\.\\d+)?)")
-                val match = regex.find(lower)
-                val amount = match?.value?.toDoubleOrNull() ?: 0.0
-                if (amount > 0) {
-                    val note = lower.replace(regex, "")
-                        .replace("سجل", "")
-                        .replace("مصروف", "")
-                        .replace("مصاريف", "")
-                        .replace("جنيه", "")
-                        .replace("أضف", "")
-                        .replace("اضف", "")
-                        .trim()
-                    db.expenseTransactionDao().insertTransaction(
-                        com.voiceagent.automation.model.ExpenseTransaction(
-                            amount = amount,
-                            type = "expense",
-                            category = "عام",
-                            note = note.ifBlank { "مصروف صوتي" }
-                        )
-                    )
-                    com.voiceagent.automation.voice.TextToSpeechManager.speak("تم تسجيل مصروف $amount جنيه بنجاح")
-                    matchedAutomation = null
-                    ambiguousOptions = emptyList()
-                    matchConfidenceText = "تم تسجيل المصروف في مصروفي: $amount ج.م (${note.ifBlank { "عام" }})"
-                    return@LaunchedEffect
-                }
-            }
 
             val result = CommandMatchingEngine.matchCommand(spokenText, automations.filter { it.isEnabled })
             when (result) {
@@ -195,74 +163,91 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         contentPadding = PaddingValues(top = 16.dp, bottom = 90.dp)
     ) {
-        // Banking Protection & Safe Mode Header Card
+        // Banking Protection & Accessibility Control Card
         item {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 14.dp)
+                    .padding(bottom = 16.dp)
                     .clickable { onNavigateToBankingProtection() },
-                colors = CardDefaults.cardColors(containerColor = Emerald50),
-                shape = RoundedCornerShape(14.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+                border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f))
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(40.dp)
+                            .shadow(4.dp, CircleShape)
                             .clip(CircleShape)
-                            .background(Emerald600),
+                            .background(Brush.linearGradient(listOf(Emerald500, Emerald700))),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "منع أتمتة إنستاباي والبنوك نشط",
+                                text = "حماية البنوك وإنستاباي نشطة",
                                 fontWeight = FontWeight.Bold,
-                                color = Emerald900,
-                                fontSize = 13.sp
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 13.5.sp
                             )
-                            Surface(color = Emerald600, shape = RoundedCornerShape(4.dp)) {
-                                Text("Safe Mode", color = Color.White, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                            Surface(color = Emerald500.copy(alpha = 0.16f), shape = RoundedCornerShape(6.dp)) {
+                                Text("Safe Mode", color = Emerald600, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                             }
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "لا يتدخل في تطبيقات البنوك. لتشغيل إنستاباي قد تحتاج لإيقاف الـ Accessibility مؤقتاً.",
-                            color = Slate600,
+                            text = if (isServiceConnected) {
+                                "الـ Accessibility مفعّل الآن • يُغلق تلقائياً عند الخروج"
+                            } else {
+                                "الـ Accessibility متوقف حالياً (آمن لتطبيقات البنوك)"
+                            },
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                             fontSize = 11.sp
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            onClick = {
-                                val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                            },
-                            color = Emerald100,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(
+                                onClick = {
+                                    if (isServiceConnected) {
+                                        AccessibilityControlHelper.disableNow(context)
+                                    } else {
+                                        AccessibilityControlHelper.enableOrOpenSettings(context)
+                                    }
+                                },
+                                color = if (isServiceConnected) Red500.copy(alpha = 0.14f) else Emerald500.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, if (isServiceConnected) Red500.copy(alpha = 0.4f) else Emerald500.copy(alpha = 0.4f))
                             ) {
-                                Icon(Icons.Default.AccessibilityNew, contentDescription = null, tint = Emerald700, modifier = Modifier.size(14.dp))
-                                Text(
-                                    text = if (isServiceConnected) "إيقاف/إعدادات الـ Accessibility مؤقتاً" else "تفعيل الـ Accessibility",
-                                    color = Emerald900,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isServiceConnected) Icons.Default.PowerSettingsNew else Icons.Default.AccessibilityNew,
+                                        contentDescription = null,
+                                        tint = if (isServiceConnected) Red600 else Emerald600,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = if (isServiceConnected) "إيقاف الـ Accessibility الآن" else "تفعيل الـ Accessibility",
+                                        color = if (isServiceConnected) Red600 else Emerald600,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Emerald700)
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
                 }
             }
         }
@@ -342,56 +327,83 @@ fun HomeScreen(
 
         // Hero Greeting Card
         item {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+            ) {
+                Text(
+                    text = "JARVIS AI ASSISTANT",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.4.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
-                text = "Voice Agent",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = "Hello! What would you like me to do?",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                text = "أهلاً بك، أنا جاهز لأوامرك",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center
             )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "أهلاً بك! ماذا تريد أن أنفذ لك من مهام مؤتمتة الآن؟",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                text = "اضغط على المايكروفون وتحدث لتنفيذ مهامك تلقائياً",
+                fontSize = 12.5.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(22.dp))
         }
 
-        // Giant Central Glow Microphone Button
+        // Giant Central Glow Microphone Orb
         item {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(160.dp)
+                    .size(168.dp)
                     .scale(micScale)
             ) {
-                // Outer glow ripple
+                // Outer ambient halo
                 Box(
                     modifier = Modifier
-                        .size(160.dp)
+                        .size(168.dp)
                         .clip(CircleShape)
                         .background(
-                            if (voiceState is VoiceState.Listening) Emerald500.copy(alpha = 0.25f) else Color.Transparent
+                            if (voiceState is VoiceState.Listening) Red500.copy(alpha = 0.18f)
+                            else Emerald500.copy(alpha = 0.10f)
                         )
                 )
-                // Mid glow ring
+                // Inner soft ring
                 Box(
                     modifier = Modifier
-                        .size(130.dp)
+                        .size(142.dp)
                         .clip(CircleShape)
                         .background(
-                            Brush.radialGradient(
+                            if (voiceState is VoiceState.Listening) Red500.copy(alpha = 0.24f)
+                            else Emerald500.copy(alpha = 0.16f)
+                        )
+                )
+                // Main Elevated Orb Button
+                Box(
+                    modifier = Modifier
+                        .size(116.dp)
+                        .shadow(
+                            elevation = 16.dp,
+                            shape = CircleShape,
+                            ambientColor = if (voiceState is VoiceState.Listening) Red500 else Emerald500,
+                            spotColor = if (voiceState is VoiceState.Listening) Red500 else Emerald500
+                        )
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
                                 listOf(
                                     if (voiceState is VoiceState.Listening) Red500 else Emerald500,
-                                    if (voiceState is VoiceState.Listening) Red600 else Emerald600
+                                    if (voiceState is VoiceState.Listening) Red700 else Indigo600
                                 )
                             )
                         )
@@ -417,25 +429,37 @@ fun HomeScreen(
                         imageVector = if (voiceState is VoiceState.Listening) Icons.Default.MicOff else Icons.Default.Mic,
                         contentDescription = "Voice Input",
                         tint = Color.White,
-                        modifier = Modifier.size(54.dp)
+                        modifier = Modifier.size(48.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = when (voiceState) {
-                    is VoiceState.Listening -> "أنصت لصوتك الآن... تحدث بأمرك"
-                    is VoiceState.Processing -> "جاري تحليل الأمر الصوتي..."
-                    is VoiceState.Success -> "تم التعرف على: \"${(voiceState as VoiceState.Success).recognizedText}\""
-                    is VoiceState.Error -> (voiceState as VoiceState.Error).message
-                    else -> "اضغط على المايكروفون وتحدث بأي أمر مسجل"
-                },
-                fontSize = 12.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (voiceState is VoiceState.Listening) Red500 else MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center
-            )
+            Surface(
+                color = if (voiceState is VoiceState.Listening) Red500.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(50),
+                shadowElevation = 2.dp,
+                border = BorderStroke(
+                    1.dp,
+                    if (voiceState is VoiceState.Listening) Red500.copy(alpha = 0.4f)
+                    else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                )
+            ) {
+                Text(
+                    text = when (voiceState) {
+                        is VoiceState.Listening -> "🎙️ أنصت لصوتك الآن... تحدث بأمرك"
+                        is VoiceState.Processing -> "⏳ جاري تحليل الأمر الصوتي..."
+                        is VoiceState.Success -> "✅ \"${(voiceState as VoiceState.Success).recognizedText}\""
+                        is VoiceState.Error -> (voiceState as VoiceState.Error).message
+                        else -> "اضغط للتحدث مع جارفس"
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (voiceState is VoiceState.Listening) Red500 else MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(20.dp))
         }
 
@@ -539,7 +563,9 @@ fun HomeScreen(
                                 .clickable {
                                     AutomationExecutionEngine.executeAutomation(context, auto)
                                 },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
@@ -790,7 +816,9 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
@@ -939,45 +967,48 @@ fun HomeScreen(
             }
         }
 
-        // Quick Action Buttons (Compact & Responsive on all screen widths)
+        // Quick Action Buttons (Modern Elevated Pills)
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp),
+                    .padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
                     onClick = onNavigateToBrowser,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 ) {
                     Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("المتصفح المدمج", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("المتصفح المدمج", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 Button(
                     onClick = onNavigateToCreate,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Blue600),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Indigo600),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("مهمة جديدة", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("مهمة جديدة", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = onNavigateToMyAutomations,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 12.dp)
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 ) {
                     Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("المهام", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("المهام", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
         }

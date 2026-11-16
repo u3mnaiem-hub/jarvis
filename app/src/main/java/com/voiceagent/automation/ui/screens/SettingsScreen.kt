@@ -46,6 +46,7 @@ fun SettingsScreen(
     val isServiceConnected by VoiceAccessibilityService.isServiceConnected.collectAsState()
 
     var spokenFeedbackEnabled by remember { mutableStateOf(SafeModeManager.isTtsEnabled(context)) }
+    var autoDisableA11y by remember { mutableStateOf(SafeModeManager.isAutoDisableAccessibilityOnExit(context)) }
     var selectedLanguage by remember { mutableStateOf(SafeModeManager.getVoiceLanguage(context)) }
 
     Scaffold(
@@ -247,11 +248,32 @@ fun SettingsScreen(
             // Voice & Speech Settings Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("إعدادات الصوت والنطق", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("إعدادات الصوت والنطق والأمان", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text("إيقاف الـ Accessibility تلقائياً عند الخروج", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("يلغي إمكانية الوصول تلقائياً بمجرد إغلاق جارفس", fontSize = 11.sp, color = LightTextSecondary)
+                        }
+                        Switch(
+                            checked = autoDisableA11y,
+                            onCheckedChange = {
+                                autoDisableA11y = it
+                                SafeModeManager.setAutoDisableAccessibilityOnExit(context, it)
+                            }
+                        )
+                    }
+
+                    Divider(color = MaterialTheme.colorScheme.surfaceVariant)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),

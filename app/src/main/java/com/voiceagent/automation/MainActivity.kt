@@ -28,6 +28,7 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.voiceagent.automation.engine.WebMacroEngine
 import com.voiceagent.automation.security.SafeModeManager
+import com.voiceagent.automation.service.AccessibilityControlHelper
 import com.voiceagent.automation.ui.navigation.Screen
 import com.voiceagent.automation.ui.screens.*
 import com.voiceagent.automation.ui.theme.VoiceAgentTheme
@@ -54,7 +55,6 @@ class MainActivity : ComponentActivity() {
 
                 val bottomNavItems = listOf(
                     BottomNavItem(Screen.Home, Icons.Default.Home, R.string.nav_home),
-                    BottomNavItem(Screen.Finance, Icons.Default.AccountBalanceWallet, R.string.nav_finance),
                     BottomNavItem(Screen.MyAutomations, Icons.Default.SmartToy, R.string.nav_my_automations),
                     BottomNavItem(Screen.CreateWorkflow, Icons.Default.AddCircle, R.string.nav_create),
                     BottomNavItem(Screen.ExecutionHistory, Icons.Default.History, R.string.nav_history),
@@ -63,7 +63,6 @@ class MainActivity : ComponentActivity() {
 
                 val showBottomBar = currentRoute in listOf(
                     Screen.Home.route,
-                    Screen.Finance.route,
                     Screen.MyAutomations.route,
                     Screen.ExecutionHistory.route,
                     Screen.Settings.route
@@ -73,45 +72,59 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     bottomBar = {
                         if (showBottomBar) {
-                            NavigationBar(
-                                tonalElevation = 3.dp
+                            Surface(
+                                shadowElevation = 12.dp,
+                                tonalElevation = 4.dp,
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
                             ) {
-                                bottomNavItems.forEach { item ->
-                                    val selected = currentRoute == item.screen.route
-                                    NavigationBarItem(
-                                        icon = {
-                                            Icon(
-                                                imageVector = item.icon,
-                                                contentDescription = stringResource(item.labelRes)
-                                            )
-                                },
-                                        label = {
-                                            Text(
-                                                text = stringResource(item.labelRes),
-                                                fontSize = 10.5.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                },
-                                        alwaysShowLabel = true,
-                                        selected = selected,
-                                        onClick = {
-                                            if (item.screen == Screen.CreateWorkflow) {
-                                                navController.navigate("workflow_editor/new")
-                                    } else {
-                                                navController.navigate(item.screen.route) {
-                                                    popUpTo(navController.graph.findStartDestination().id) {
-                                                        saveState = true
+                                NavigationBar(
+                                    containerColor = Color.Transparent,
+                                    tonalElevation = 0.dp
+                                ) {
+                                    bottomNavItems.forEach { item ->
+                                        val selected = currentRoute == item.screen.route
+                                        NavigationBarItem(
+                                            icon = {
+                                                Icon(
+                                                    imageVector = item.icon,
+                                                    contentDescription = stringResource(item.labelRes)
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = stringResource(item.labelRes),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                                indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                            ),
+                                            alwaysShowLabel = true,
+                                            selected = selected,
+                                            onClick = {
+                                                if (item.screen == Screen.CreateWorkflow) {
+                                                    navController.navigate("workflow_editor/new")
+                                                } else {
+                                                    navController.navigate(item.screen.route) {
+                                                        popUpTo(navController.graph.findStartDestination().id) {
+                                                            saveState = true
+                                                        }
+                                                        launchSingleTop = true
+                                                        restoreState = true
+                                                    }
+                                                }
                                             }
-                                                    launchSingleTop = true
-                                                    restoreState = true
-                                        }
+                                        )
                                     }
                                 }
-                                    )
+                            }
                         }
-                    }
-                }
             }
                 ) { innerPadding ->
                     val activeWebView by WebMacroEngine.activeWebViewFlow.collectAsState()
@@ -140,10 +153,6 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToBackup = { navController.navigate(Screen.WorkflowBackup.route)},
                                 onNavigateToBrowser = { navController.navigate(Screen.Browser.route)}
                             )
-                }
-
-                        composable(Screen.Finance.route) {
-                            MasrofyFinanceScreen()
                 }
 
                         composable(Screen.Browser.route) {
@@ -291,5 +300,12 @@ class MainActivity : ComponentActivity() {
     private fun shouldAutoListen(intent: Intent?): Boolean {
         val isListenDeepLink = intent?.data?.scheme == "voiceagent" && intent.data?.host == "listen"
         return isListenDeepLink || SafeModeManager.isAutoListenOnLaunchEnabled(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isFinishing && SafeModeManager.isAutoDisableAccessibilityOnExit(this)) {
+            AccessibilityControlHelper.disableNow(this)
+        }
     }
 }

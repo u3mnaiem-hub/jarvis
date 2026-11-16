@@ -32,6 +32,14 @@ class VoiceAccessibilityService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (com.voiceagent.automation.security.SafeModeManager.isAutoDisableAccessibilityOnExit(applicationContext)) {
+            Log.i(TAG, "App task removed — auto-disabling VoiceAccessibilityService")
+            disableServiceSelf()
+        }
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         
@@ -541,5 +549,27 @@ class VoiceAccessibilityService : AccessibilityService() {
 
         val isAvailable: Boolean
             get() = instance != null
+
+        /**
+         * Programmatically disables this AccessibilityService (Android 7.0+ / API 24+).
+         * Works without root or WRITE_SECURE_SETTINGS.
+         */
+        fun disableServiceSelf(): Boolean {
+            val svc = instance ?: return false
+            return try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                    svc.disableSelf()
+                    _isServiceConnected.value = false
+                    instance = null
+                    Log.i(TAG, "VoiceAccessibilityService disabled via disableSelf()")
+                    true
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to disableSelf(): ${e.message}")
+                false
+            }
+        }
     }
 }

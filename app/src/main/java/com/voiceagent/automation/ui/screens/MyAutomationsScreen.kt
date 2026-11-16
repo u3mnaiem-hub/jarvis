@@ -277,17 +277,13 @@ fun AutomationCard(
                         Text(
                             text = automation.name,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.5.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 14.sp
                         )
                         if (automation.nameAr.isNotBlank()) {
                             Text(
                                 text = automation.nameAr,
-                                fontSize = 11.5.sp,
-                                color = LightTextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                fontSize = 12.sp,
+                                color = LightTextSecondary
                             )
                         }
                     }
@@ -303,18 +299,24 @@ fun AutomationCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Voice Phrase Badges
+            // Voice Phrase Badges (Full text visible without clipping)
             if (automation.voicePhrases.isNotEmpty()) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(automation.voicePhrases.take(4)) { phrase ->
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("🎙️ $phrase", fontSize = 10.sp, maxLines = 1) },
-                            colors = AssistChipDefaults.assistChipColors(containerColor = Blue100)
-                        )
+                    automation.voicePhrases.take(4).forEach { phrase ->
+                        Surface(
+                            color = Blue100,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "🎙️ $phrase",
+                                fontSize = 11.sp,
+                                color = LightTextPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))

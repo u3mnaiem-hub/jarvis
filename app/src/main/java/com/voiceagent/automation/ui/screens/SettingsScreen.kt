@@ -28,6 +28,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.model.Automation
+import com.voiceagent.automation.security.RouterCredentialsHelper
 import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.VoiceAccessibilityService
 import com.voiceagent.automation.template.DemoWorkflows
@@ -50,6 +51,11 @@ fun SettingsScreen(
     var spokenFeedbackEnabled by remember { mutableStateOf(SafeModeManager.isTtsEnabled(context)) }
     var autoDisableA11y by remember { mutableStateOf(SafeModeManager.isAutoDisableAccessibilityOnExit(context)) }
     var selectedLanguage by remember { mutableStateOf(SafeModeManager.getVoiceLanguage(context)) }
+
+    val routerPrefs = remember { context.getSharedPreferences(RouterCredentialsHelper.PREFS_NAME, android.content.Context.MODE_PRIVATE) }
+    var routerUserDraft by remember { mutableStateOf(routerPrefs.getString(RouterCredentialsHelper.KEY_ROUTER_USER, "") ?: "") }
+    var routerPassDraft by remember { mutableStateOf("") }
+    var routerSaveStatus by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -244,6 +250,72 @@ fun SettingsScreen(
                         Text("إدارة كلمات مرور الراوتر والخدمات المشفرة بأمان", fontSize = 11.5.sp, color = LightTextSecondary)
                     }
                     Icon(Icons.Default.ChevronRight, contentDescription = null, tint = LightTextSecondary)
+                }
+            }
+
+            // Router Credentials Box (Copy inside Settings)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Router, contentDescription = null, tint = Emerald600)
+                        Text("إعداد بيانات دخول الراوتر (ZTE H188A)", fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                    }
+                    Text(
+                        "تُحفظ البيانات مشفرة محلياً على هاتفك فقط لاستخدامها في الدخول التلقائي للراوتر.",
+                        fontSize = 11.5.sp,
+                        color = LightTextSecondary
+                    )
+                    OutlinedTextField(
+                        value = routerUserDraft,
+                        onValueChange = { routerUserDraft = it },
+                        label = { Text("اسم المستخدم (Username)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = routerPassDraft,
+                        onValueChange = { routerPassDraft = it },
+                        label = { Text("كلمة المرور (Password)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = {
+                            if (routerUserDraft.isNotBlank() && routerPassDraft.isNotBlank()) {
+                                val userToSave = routerUserDraft
+                                val passToSave = routerPassDraft
+                                coroutineScope.launch {
+                                    val savedUser = RouterCredentialsHelper.saveRouterCredentials(
+                                        context, db, userToSave, passToSave
+                                    )
+                                    routerSaveStatus = "تم حفظ بيانات دخول الراوتر ($savedUser) مشفرة بنجاح!"
+                                    Toast.makeText(context, "تم حفظ بيانات الراوتر مشفرة", Toast.LENGTH_SHORT).show()
+                                }
+                                routerPassDraft = ""
+                            } else {
+                                routerSaveStatus = "خطأ: يرجى إدخال اسم المستخدم وكلمة المرور معاً."
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("حفظ مشفر", fontWeight = FontWeight.Bold)
+                    }
+                    if (routerSaveStatus != null) {
+                        Text(
+                            text = routerSaveStatus!!,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (routerSaveStatus!!.contains("خطأ")) Red600 else Emerald700
+                        )
+                    }
                 }
             }
 

@@ -9,6 +9,7 @@ import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.model.*
 import com.voiceagent.automation.security.BankingProtectionManager
 import com.voiceagent.automation.security.KeystoreManager
+import com.voiceagent.automation.security.RouterCredentialsHelper
 import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.AutomationForegroundService
 import com.voiceagent.automation.service.VoiceAccessibilityService
@@ -447,7 +448,9 @@ object AutomationExecutionEngine {
                     val cred = db.credentialDao().getCredentialByKey(credKey)
                         ?: db.credentialDao().getCredentialByKey("router_admin_pass")
                         ?: db.credentialDao().getCredentialByKey("router_password")
-                        ?: return StepResult(false, "Credential '$credKey' not found in vault. Please save your router password first.", actionAttempted = false, elementFound = false)
+                    if (cred == null || cred.label == RouterCredentialsHelper.DEFAULT_SEED_LABEL) {
+                        return StepResult(false, RouterCredentialsHelper.MISSING_CREDENTIALS_ERROR, actionAttempted = false, elementFound = false)
+                    }
                     val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
                     val ok = webEngine.fillField(cssSelectors, textCandidates, decryptedPassword, timeoutMs, isSensitive = true)
                     if (ok) {
@@ -464,7 +467,9 @@ object AutomationExecutionEngine {
                 val cred = db.credentialDao().getCredentialByKey(key)
                     ?: db.credentialDao().getCredentialByKey("router_admin_pass")
                     ?: db.credentialDao().getCredentialByKey("router_password")
-                    ?: return StepResult(false, "Credential key '$key' not found in vault", actionAttempted = false, elementFound = false)
+                if (cred == null || cred.label == RouterCredentialsHelper.DEFAULT_SEED_LABEL) {
+                    return StepResult(false, RouterCredentialsHelper.MISSING_CREDENTIALS_ERROR, actionAttempted = false, elementFound = false)
+                }
                 val decryptedPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
                 val ok = webEngine.fillField(cssSelectors, textCandidates, decryptedPassword, timeoutMs, isSensitive = true)
                 if (ok) {
@@ -1258,16 +1263,18 @@ object AutomationExecutionEngine {
         db: VoiceAgentDatabase,
         baseUrl: String = "https://192.168.1.1/",
         credentialKey: String = "router_admin_pass",
-        username: String = "admin"
+        username: String = ""
     ): Pair<ZteRouterHttpClient, ZteRouterHttpClient.RouterLoginResult> {
         val client = ZteRouterHttpClient(baseUrl = baseUrl, debugMode = true)
         val cred = db.credentialDao().getCredentialByKey(credentialKey)
             ?: db.credentialDao().getCredentialByKey("router_password")
             ?: db.credentialDao().getCredentialByKey("router_admin_pass")
-            ?: return client to ZteRouterHttpClient.RouterLoginResult.Failure(
+        if (username.isBlank() || cred == null || cred.label == RouterCredentialsHelper.DEFAULT_SEED_LABEL) {
+            return client to ZteRouterHttpClient.RouterLoginResult.Failure(
                 ZteRouterHttpClient.FailureType.LOGIN_REJECTED,
-                "Router password not found in secure Credential Vault (key '$credentialKey'). Please save your router password first."
+                RouterCredentialsHelper.MISSING_CREDENTIALS_ERROR
             )
+        }
         val plainPassword = KeystoreManager.decrypt(cred.encryptedData, cred.iv)
         db.credentialDao().updateLastUsed(cred.key, System.currentTimeMillis())
         val loginRes = client.login(plainPassword = plainPassword, username = username)
@@ -1297,12 +1304,11 @@ object AutomationExecutionEngine {
         }
         val credKey = automation.steps.firstOrNull { it.actionType == ActionType.INJECT_CREDENTIAL }
             ?.credentialKey ?: "router_admin_pass"
-        val prefs = context.getSharedPreferences("voice_agent_prefs", Context.MODE_PRIVATE)
-        val routerUsername = automation.steps.firstOrNull {
+        val savedCreds = RouterCredentialsHelper.getRouterCredentials(context, db, credKey)
+        val stepUsername = automation.steps.firstOrNull {
             it.actionType == ActionType.SET_TEXT && (it.selectorResourceId == "Frm_Username" || it.cssSelector?.contains("Frm_Username") == true)
         }?.textPayload?.takeIf { it.isNotBlank() }
-            ?: prefs.getString("router_admin_user", "admin")?.takeIf { it.isNotBlank() }
-            ?: "admin"
+        val routerUsername = stepUsername ?: savedCreds?.first.orEmpty()
 
         val baseUrl = "https://192.168.1.1/"
         var client: ZteRouterHttpClient? = null
@@ -1314,10 +1320,37 @@ object AutomationExecutionEngine {
         var completedCount = 0
         val totalLogicalSteps = 3
 
-        val cred = db.credentialDao().getCredentialByKey(credKey)
-            ?: db.credentialDao().getCredentialByKey("router_password")
-            ?: db.credentialDao().getCredentialByKey("router_admin_pass")
-        val plainPassword = cred?.let { KeystoreManager.decrypt(it.encryptedData, it.iv) }
+        val plainPassword = savedCreds?.second
+        if (routerUsername.isBlank() || plainPassword.isNullOrBlank()) {
+            val missingMsg = RouterCredentialsHelper.MISSING_CREDENTIALS_ERROR
+            val now = System.currentTimeMillis()
+            stepDetails.add(
+                StepExecutionDetail(
+                    stepOrder = 1,
+                    stepTitle = "فحص بيانات دخول الراوتر",
+                    actionType = ActionType.INJECT_CREDENTIAL,
+                    status = StepStatus.FAILED,
+                    startedAt = startTime,
+                    finishedAt = now,
+                    expectedElement = "router_admin_user / router_admin_pass",
+                    elementFound = false,
+                    actionAttempted = false,
+                    actionConfirmed = false,
+                    failureReason = missingMsg,
+                    suggestedAction = "أدخل اسم المستخدم وكلمة المرور للراوتر واحفظهما مشفرين من الشاشة الرئيسية أو الإعدادات.",
+                    message = missingMsg
+                )
+            )
+            if (SafeModeManager.isTtsEnabled(context)) {
+                TextToSpeechManager.speak(missingMsg)
+            }
+            recordLogAndFinish(
+                db, context, automation, startTime, false,
+                0, totalLogicalSteps, "فحص بيانات دخول الراوتر", missingMsg,
+                "MISSING_CREDENTIALS", "أدخل اسم المستخدم وكلمة المرور للراوتر واحفظهما مشفرين.", stepDetails, onComplete
+            )
+            return
+        }
 
         try {
             // Step 1 & 2: Direct HTTP Login (GET token -> POST SHA-256 credentials)

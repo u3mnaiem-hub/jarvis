@@ -44,21 +44,6 @@ class VoiceAgentApp : Application() {
                     Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows (v$ROUTER_WORKFLOWS_VERSION) for device: $customDevice + 4 target devices")
                 }
 
-                // Check router credential seed
-                val credKey = "router_admin_pass"
-                val existingCred = db.credentialDao().getCredentialByKey(credKey)
-                if (existingCred == null) {
-                    val encrypted = KeystoreManager.encrypt("admin123")
-                    db.credentialDao().insertOrUpdate(
-                        Credential(
-                            key = credKey,
-                            label = "Router Admin Password (Default)",
-                            encryptedData = encrypted.encryptedBase64,
-                            iv = encrypted.ivBase64
-                        )
-                    )
-                    Log.i("VoiceAgentApp", "Created secure Keystore-encrypted router credential placeholder")
-                }
             } catch (e: Exception) {
                 Log.e("VoiceAgentApp", "Error during app initialization: ${e.message}")
             }

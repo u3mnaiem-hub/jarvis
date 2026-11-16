@@ -39,12 +39,14 @@ import com.voiceagent.automation.data.db.VoiceAgentDatabase
 import com.voiceagent.automation.engine.AutomationExecutionEngine
 import com.voiceagent.automation.engine.ExecutionState
 import com.voiceagent.automation.model.Automation
+import com.voiceagent.automation.security.RouterCredentialsHelper
 import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.AccessibilityControlHelper
 import com.voiceagent.automation.service.VoiceAccessibilityService
 import com.voiceagent.automation.ui.theme.*
 import com.voiceagent.automation.voice.CommandMatchingEngine
 import com.voiceagent.automation.voice.MatchResult
+import com.voiceagent.automation.voice.TextToSpeechManager
 import com.voiceagent.automation.voice.VoiceRecognitionManager
 import com.voiceagent.automation.voice.VoiceState
 import kotlinx.coroutines.launch
@@ -128,6 +130,9 @@ fun HomeScreen(
                     matchedAutomation = result.automation
                     matchConfidenceText = "Matched ${(result.score * 100).toInt()}%: ${result.automation.name}"
                     ambiguousOptions = emptyList()
+                    if (result.score > 0.80) {
+                        AutomationExecutionEngine.executeAutomation(context, result.automation)
+                    }
                 }
                 is MatchResult.AmbiguousMatch -> {
                     ambiguousOptions = result.candidateAutomations
@@ -199,7 +204,7 @@ fun HomeScreen(
                             fontSize = 12.5.sp
                         )
                         Text(
-                            text = if (isServiceConnected) "Accessibility مفعّل" else "آمن (متوقف)",
+                            text = if (isServiceConnected) "Accessibility (مفعّل)" else "Accessibility (متوقف - آمن)",
                             color = if (isServiceConnected) Red600 else Emerald700,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.SemiBold
@@ -249,7 +254,7 @@ fun HomeScreen(
             var isRouterBusy by remember { mutableStateOf(false) }
             var showRouterCredDialog by remember { mutableStateOf(false) }
             val prefs = remember { context.getSharedPreferences("voice_agent_prefs", android.content.Context.MODE_PRIVATE) }
-            var routerUserDraft by remember { mutableStateOf(prefs.getString("router_admin_user", "admin") ?: "admin") }
+            var routerUserDraft by remember { mutableStateOf(prefs.getString("router_admin_user", "") ?: "") }
             var routerPassDraft by remember { mutableStateOf("") }
 
             fun triggerQuickRouterMacro(deviceName: String, radioVal: String) {
@@ -317,32 +322,19 @@ fun HomeScreen(
                     confirmButton = {
                         Button(
                             onClick = {
-                                if (routerPassDraft.isNotBlank()) {
-                                    val cleanUser = routerUserDraft.trim().ifBlank { "admin" }
-                                    prefs.edit().putString("router_admin_user", cleanUser).apply()
+                                if (routerUserDraft.isNotBlank() && routerPassDraft.isNotBlank()) {
+                                    val userToSave = routerUserDraft
                                     val passToSave = routerPassDraft
                                     coroutineScope.launch {
-                                        val enc = com.voiceagent.automation.security.KeystoreManager.encrypt(passToSave)
-                                        db.credentialDao().insertOrUpdate(
-                                            com.voiceagent.automation.model.Credential(
-                                                key = "router_admin_pass",
-                                                label = "ZTE Router Admin Password",
-                                                encryptedData = enc.encryptedBase64,
-                                                iv = enc.ivBase64
-                                            )
+                                        val savedUser = RouterCredentialsHelper.saveRouterCredentials(
+                                            context, db, userToSave, passToSave
                                         )
-                                        db.credentialDao().insertOrUpdate(
-                                            com.voiceagent.automation.model.Credential(
-                                                key = "router_password",
-                                                label = "Router Password",
-                                                encryptedData = enc.encryptedBase64,
-                                                iv = enc.ivBase64
-                                            )
-                                        )
-                                        routerStatusText = "تم حفظ بيانات دخول الراوتر ($cleanUser) بنجاح!"
+                                        routerStatusText = "تم حفظ بيانات دخول الراوتر ($savedUser) مشفرة بنجاح!"
                                     }
                                     routerPassDraft = ""
                                     showRouterCredDialog = false
+                                } else {
+                                    routerStatusText = "خطأ: يرجى إدخال اسم المستخدم وكلمة المرور معاً."
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
@@ -361,9 +353,10 @@ fun HomeScreen(
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 14.dp)
+                    .padding(bottom = 10.dp),
+                cornerRadius = 16.dp
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -373,84 +366,103 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.Router, contentDescription = null, tint = Emerald600)
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(Emerald500, Emerald700))),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Router, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                            }
                             Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "تحكم كامل في الراوتر (ZTE H188)",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.5.sp,
-                                    color = LightTextPrimary
-                                )
-                                Text(
-                                    text = "بروتوكول HTTP مباشر + جسر JavaScript",
-                                    fontSize = 11.sp,
-                                    color = LightTextSecondary
+                            Text(
+                                text = "تحكم كامل في الراوتر",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = LightTextPrimary
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                onClick = { showRouterCredDialog = true },
+                                color = Amber500.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Amber500.copy(alpha = 0.4f))
+                            ) {
+                                Icon(
+                                    Icons.Default.Key,
+                                    contentDescription = "بيانات الراوتر",
+                                    tint = Amber700,
+                                    modifier = Modifier.padding(6.dp).size(15.dp)
                                 )
                             }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        OutlinedButton(
-                            onClick = {
-                                if (!isRouterBusy) {
-                                    isRouterBusy = true
-                                    routerStatusText = "جاري الاتصال بالراوتر 192.168.1.1 وفحص التوكن..."
-                                    coroutineScope.launch {
-                                        try {
-                                            val (client, loginRes) = AutomationExecutionEngine.loginToZteRouter(db)
-                                            when (loginRes) {
-                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Success -> {
-                                                    val (_, devices) = client.fetchParentalControlDevices()
-                                                    client.logout()
-                                                    routerDevices = devices
-                                                    routerStatusText = if (devices.isNotEmpty()) {
-                                                        "تم الدخول بنجاح! تم العثور على ${devices.size} قاعدة في Parental Control."
-                                                    } else {
-                                                        "تم الدخول للراوتر بنجاح!"
+                            Surface(
+                                onClick = {
+                                    if (!isRouterBusy) {
+                                        isRouterBusy = true
+                                        routerStatusText = "جاري الاتصال بالراوتر 192.168.1.1..."
+                                        coroutineScope.launch {
+                                            try {
+                                                val creds = RouterCredentialsHelper.getRouterCredentials(context, db)
+                                                if (creds == null) {
+                                                    routerStatusText = RouterCredentialsHelper.MISSING_CREDENTIALS_ERROR
+                                                } else {
+                                                    val (client, loginRes) = AutomationExecutionEngine.loginToZteRouter(
+                                                        db = db,
+                                                        username = creds.first
+                                                    )
+                                                    when (loginRes) {
+                                                        is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Success -> {
+                                                            val (_, devices) = client.fetchParentalControlDevices()
+                                                            client.logout()
+                                                            routerDevices = devices
+                                                            routerStatusText = if (devices.isNotEmpty()) {
+                                                                "تم الدخول بنجاح! (${devices.size} جهاز)"
+                                                            } else {
+                                                                "تم الدخول للراوتر بنجاح!"
+                                                            }
+                                                        }
+                                                        is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Failure -> {
+                                                            routerStatusText = "خطأ: ${loginRes.message}"
+                                                        }
                                                     }
                                                 }
-                                                is com.voiceagent.automation.engine.ZteRouterHttpClient.RouterLoginResult.Failure -> {
-                                                    routerStatusText = "نتيجة الفحص: ${loginRes.message}"
-                                                }
+                                            } catch (e: Exception) {
+                                                routerStatusText = "خطأ أثناء الفحص: ${e.message}"
+                                            } finally {
+                                                isRouterBusy = false
                                             }
-                                        } catch (e: Exception) {
-                                            routerStatusText = "خطأ أثناء الفحص: ${e.message}"
-                                        } finally {
-                                            isRouterBusy = false
                                         }
                                     }
+                                },
+                                color = Emerald500.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (isRouterBusy) {
+                                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = Emerald700)
+                                    }
+                                    Text("فحص", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Emerald700)
                                 }
-                            },
-                            enabled = !isRouterBusy,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            if (isRouterBusy) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
                             }
-                            Text("فحص الأجهزة", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { showRouterCredDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp), tint = Amber600)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("إعداد / حفظ يوزر وباسورد الراوتر للدخول التلقائي", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                     }
 
                     if (routerStatusText != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = routerStatusText!!,
-                            fontSize = 11.5.sp,
-                            color = LightTextPrimary,
+                            fontSize = 11.sp,
+                            color = if (routerStatusText!!.contains("خطأ") || routerStatusText!!.contains("لا توجد")) Red600 else LightTextPrimary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -493,10 +505,16 @@ fun HomeScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp),
+                        .padding(bottom = 16.dp)
+                        .shadow(
+                            elevation = 14.dp,
+                            shape = RoundedCornerShape(16.dp),
+                            ambientColor = GlassShadowColor.copy(alpha = 0.45f),
+                            spotColor = GlassShadowColor.copy(alpha = 0.55f)
+                        ),
                     colors = CardDefaults.cardColors(containerColor = Amber100),
                     shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(
@@ -645,13 +663,24 @@ fun HomeScreen(
                             if (voiceState is VoiceState.Listening) {
                                 voiceManager.stopListening()
                             } else {
+                                val a11yDisabled = !isServiceConnected
+                                if (a11yDisabled) {
+                                    TextToSpeechManager.speak("خدمة إمكانية الوصول غير مفعلة", isArabic = true)
+                                }
                                 val hasAudioPermission = ContextCompat.checkSelfPermission(
                                     context,
                                     Manifest.permission.RECORD_AUDIO
                                 ) == PackageManager.PERMISSION_GRANTED
 
                                 if (hasAudioPermission) {
-                                    voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
+                                    if (a11yDisabled) {
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(1600)
+                                            voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
+                                        }
+                                    } else {
+                                        voiceManager.startListening(SafeModeManager.getVoiceLanguage(context))
+                                    }
                                 } else {
                                     permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
@@ -787,61 +816,47 @@ fun HomeScreen(
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .defaultMinSize(minHeight = 92.dp)
-                        .padding(bottom = 10.dp)
+                        .padding(bottom = 8.dp)
                         .clickable {
                             AutomationExecutionEngine.executeAutomation(context, auto)
-                        }
+                        },
+                    cornerRadius = 14.dp
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(30.dp)
                                 .clip(CircleShape)
                                 .background(Emerald100),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Bolt, contentDescription = null, tint = Emerald600)
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = auto.nameAr.ifBlank { auto.name },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
-                                color = LightTextPrimary
-                            )
-                            if (auto.description.isNotBlank() || (auto.name.isNotBlank() && auto.name != auto.nameAr)) {
-                                Spacer(modifier = Modifier.height(3.dp))
-                                Text(
-                                    text = auto.description.ifBlank { auto.name },
-                                    fontSize = 11.5.sp,
-                                    color = LightTextSecondary
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${auto.steps.size} خطوات",
-                                color = Emerald700,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Icon(Icons.Default.Bolt, contentDescription = null, tint = Emerald600, modifier = Modifier.size(17.dp))
                         }
                         Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = auto.nameAr.ifBlank { auto.name },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = LightTextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = { AutomationExecutionEngine.executeAutomation(context, auto) },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("تشغيل", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("تشغيل", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -935,9 +950,17 @@ fun HomeScreen(
             ) {
                 Button(
                     onClick = onNavigateToBrowser,
-                    modifier = Modifier.weight(1f).height(46.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .shadow(
+                            10.dp,
+                            RoundedCornerShape(14.dp),
+                            ambientColor = GlassShadowColor.copy(alpha = 0.45f),
+                            spotColor = GlassShadowColor.copy(alpha = 0.55f)
+                        ),
                     shape = RoundedCornerShape(14.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 ) {
@@ -947,9 +970,17 @@ fun HomeScreen(
                 }
                 Button(
                     onClick = onNavigateToCreate,
-                    modifier = Modifier.weight(1f).height(46.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .shadow(
+                            10.dp,
+                            RoundedCornerShape(14.dp),
+                            ambientColor = GlassShadowColor.copy(alpha = 0.45f),
+                            spotColor = GlassShadowColor.copy(alpha = 0.55f)
+                        ),
                     shape = RoundedCornerShape(14.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Indigo600),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
                 ) {
@@ -962,7 +993,12 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp)
-                        .shadow(6.dp, RoundedCornerShape(14.dp), ambientColor = GlassShadowColor.copy(alpha = 0.16f)),
+                        .shadow(
+                            10.dp,
+                            RoundedCornerShape(14.dp),
+                            ambientColor = GlassShadowColor.copy(alpha = 0.45f),
+                            spotColor = GlassShadowColor.copy(alpha = 0.55f)
+                        ),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.outlinedButtonColors(containerColor = GlassCardSurface),
                     border = BorderStroke(1.2.dp, GlassCardBorder),
@@ -988,10 +1024,10 @@ private fun GlassCard(
     val shape = RoundedCornerShape(cornerRadius)
     Card(
         modifier = modifier.shadow(
-            elevation = 10.dp,
+            elevation = 14.dp,
             shape = shape,
-            ambientColor = GlassShadowColor.copy(alpha = 0.18f),
-            spotColor = GlassShadowColor.copy(alpha = 0.22f)
+            ambientColor = GlassShadowColor.copy(alpha = 0.45f),
+            spotColor = GlassShadowColor.copy(alpha = 0.55f)
         ),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = containerColor),

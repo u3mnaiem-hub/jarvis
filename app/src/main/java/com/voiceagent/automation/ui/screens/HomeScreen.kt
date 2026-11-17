@@ -87,6 +87,7 @@ fun HomeScreen(
     var matchedAutomation by remember { mutableStateOf<Automation?>(null) }
     var matchConfidenceText by remember { mutableStateOf<String?>(null) }
     var ambiguousOptions by remember { mutableStateOf<List<Automation>>(emptyList()) }
+    var showHiddenTasks by remember { mutableStateOf(false) }
 
     // Audio permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -794,7 +795,6 @@ fun HomeScreen(
         // Built-in / Favorite Quick Automations (Vertical, Equal Width, Full Text Visible)
         val favoriteList = automations.filter { it.isFavorite }
         val hiddenList = automations.filter { !it.isFavorite }
-        var showHiddenTasks by remember { mutableStateOf(false) }
 
         if (automations.isNotEmpty()) {
             item {

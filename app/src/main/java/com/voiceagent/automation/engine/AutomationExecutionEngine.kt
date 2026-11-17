@@ -1448,6 +1448,51 @@ object AutomationExecutionEngine {
         return keywords.any { combined.contains(it) }
     }
 
+    private fun expandToggleCandidates(primaryText: String?, existing: List<String>): List<String> {
+        val togglePairs = mapOf(
+            "تشغيل" to listOf("إيقاف", "ايقاف", "تعطيل"),
+            "إيقاف" to listOf("تشغيل", "بدء", "تفعيل"),
+            "ايقاف" to listOf("تشغيل", "بدء", "تفعيل"),
+            "تفعيل" to listOf("تعطيل", "إيقاف", "ايقاف"),
+            "تعطيل" to listOf("تفعيل", "تشغيل"),
+            "بدء" to listOf("إيقاف", "ايقاف"),
+            "فتح" to listOf("إغلاق", "اغلاق", "قفل"),
+            "إغلاق" to listOf("فتح"),
+            "اغلاق" to listOf("فتح"),
+            "قفل" to listOf("فتح"),
+            "كتم" to listOf("إلغاء الكتم", "تشغيل الصوت"),
+            "on" to listOf("off"),
+            "off" to listOf("on"),
+            "start" to listOf("stop"),
+            "stop" to listOf("start"),
+            "enable" to listOf("disable"),
+            "disable" to listOf("enable"),
+            "turn on" to listOf("turn off"),
+            "turn off" to listOf("turn on"),
+            "pause" to listOf("resume", "play"),
+            "resume" to listOf("pause"),
+            "play" to listOf("pause", "stop"),
+            "mute" to listOf("unmute"),
+            "unmute" to listOf("mute"),
+            "activate" to listOf("deactivate"),
+            "deactivate" to listOf("activate")
+        )
+        val result = existing.toMutableList()
+        val needles = buildList {
+            primaryText?.trim()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            addAll(existing)
+        }
+        for (needle in needles) {
+            val opposites = togglePairs[needle.lowercase()] ?: continue
+            for (opp in opposites) {
+                if (result.none { it.equals(opp, ignoreCase = true) }) {
+                    result.add(opp)
+                }
+            }
+        }
+        return result
+    }
+
     private suspend fun waitForNode(
         service: VoiceAccessibilityService,
         step: AutomationStep
@@ -1456,6 +1501,11 @@ object AutomationExecutionEngine {
         val startTime = System.currentTimeMillis()
         var keyboardDismissed = false
         var scrollAttempts = 0
+        val expandedCandidates = if (step.actionType == ActionType.CLICK_ELEMENT) {
+            expandToggleCandidates(step.selectorText ?: step.selectorContentDescription, step.candidateTexts)
+        } else {
+            step.candidateTexts
+        }
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             if (isStopRequested) return null
@@ -1464,7 +1514,7 @@ object AutomationExecutionEngine {
                 text = step.selectorText,
                 contentDesc = step.selectorContentDescription,
                 className = step.selectorClassName,
-                candidateTexts = step.candidateTexts
+                candidateTexts = expandedCandidates
             )
             if (node != null) return node
 

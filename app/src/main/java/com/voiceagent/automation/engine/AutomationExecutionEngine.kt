@@ -29,6 +29,9 @@ object AutomationExecutionEngine {
     private val _latestReportFlow = MutableStateFlow<ExecutionReport?>(null)
     val latestReportFlow: StateFlow<ExecutionReport?> = _latestReportFlow.asStateFlow()
 
+    private val _isWebViewPinnedFlow = MutableStateFlow(false)
+    val isWebViewPinnedFlow: StateFlow<Boolean> = _isWebViewPinnedFlow.asStateFlow()
+
     @Volatile
     private var isStopRequested = false
 
@@ -42,6 +45,16 @@ object AutomationExecutionEngine {
 
     fun dismissReport() {
         _latestReportFlow.value = null
+    }
+
+    fun setWebViewPinned(pinned: Boolean) {
+        _isWebViewPinnedFlow.value = pinned
+    }
+
+    private suspend fun waitWhileWebViewPinned() {
+        while (_isWebViewPinnedFlow.value && !isStopRequested) {
+            delay(250)
+        }
     }
 
     fun requestStop() {
@@ -64,6 +77,7 @@ object AutomationExecutionEngine {
 
         isStopRequested = false
         reportSpokenInRun = false
+        _isWebViewPinnedFlow.value = false
         lastAutomationTitle = automation.nameAr.ifBlank { automation.name }
         _latestReportFlow.value = null
         val totalSteps = automation.steps.size
@@ -158,6 +172,9 @@ object AutomationExecutionEngine {
 
                     val step = automation.steps[currentStepIndex]
                     val stepStartTime = System.currentTimeMillis()
+                    if (isWebMacro) {
+                        waitWhileWebViewPinned()
+                    }
 
                     // Skip disabled steps
                     if (!step.isStepEnabled) {
@@ -372,7 +389,11 @@ object AutomationExecutionEngine {
                     )
                 }
             } finally {
+                if (isWebMacro) {
+                    waitWhileWebViewPinned()
+                }
                 withContext(NonCancellable) {
+                    _isWebViewPinnedFlow.value = false
                     // Always release the router's single admin session, even after a failed run,
                     // otherwise the next attempt is blocked by "another user is logged in".
                     webEngine?.logoutQuietly()
@@ -879,7 +900,12 @@ object AutomationExecutionEngine {
             ActionType.SCROLL_FORWARD -> {
                 if (service == null) return StepResult(false, "Accessibility Service is not connected", actionAttempted = false, elementFound = false)
                 val node = waitForNode(service, step) ?: service.rootInActiveWindow
-                val success = if (node != null) service.scrollNode(node, forward = true) else false
+                var success = if (node != null) service.scrollNode(node, forward = true) else false
+                if (!success) {
+                    val dm = context.resources.displayMetrics
+                    val cx = dm.widthPixels / 2f
+                    success = awaitSwipe(service, cx, dm.heightPixels * 0.72f, cx, dm.heightPixels * 0.30f, 450L)
+                }
                 return StepResult(success, if (success) null else "Failed to scroll forward", elementFound = node != null, actionAttempted = true, actionConfirmed = success)
             }
 
@@ -1032,39 +1058,74 @@ object AutomationExecutionEngine {
 
         val fullLower = pageText.lowercase()
         val paidKeywords = listOf(
+            "كل الفواتير مدفوعة", "كل الفواتير مدفوعه", "جميع الفواتير مدفوعة", "جميع الفواتير مدفوعه",
+            "تم دفع جميع الفواتير", "لا توجد فواتير غير مدفوعة", "لا يوجد فواتير غير مدفوعة",
             "مدفوعة", "مدفوعه", "مسددة", "مسدده", "تم السداد", "خالص",
             "لا توجد فواتير", "لا يوجد فواتير", "لا توجد مستحقات", "لا يوجد مستحقات",
             "لا يوجد فواتير مستحقة", "paid", "no bills"
         )
         val errorKeywords = listOf(
-            "غير موجود", "رقم غير صحيح", "لم يتم العثور", "لا توجد بيانات", "تأكد من", "خطأ في"
+            "غير موجود", "رقم غير صحيح", "لم يتم العثور", "لا توجد بيانات", "تأكد من", "خطأ", "غير مسجل", "برجاء التحقق"
         )
-        val amountKeywords = listOf(
-            "القيمة", "قيمة الفاتورة", "المبلغ", "المطلوب", "المستحق", "إجمالي", "الاجمالي", "اجمالي",
-            "رصيد", "الفاتورة", "سداد", "amount", "total", "due"
+        val excludedNumberLineKeywords = listOf(
+            "رقم الفاتورة", "رقم الفاتوره", "رقم السداد", "الرقم الآلي", "الرقم الالي",
+            "رقم المشترك", "رقم العميل", "رقم العداد", "كود السداد", "مسلسل", "المرجع", "reference"
+        )
+        val priorityTotalKeywords = listOf(
+            "إجمالي الفاتورة", "اجمالي الفاتورة", "إجمالي الفاتوره", "اجمالي الفاتوره",
+            "الإجمالي", "الاجمالي", "إجمالي المطلوب", "اجمالي المطلوب",
+            "المبلغ المطلوب", "القيمة المطلوبة", "قيمة الفاتورة", "قيمة الفاتوره", "المستحق"
+        )
+        val secondaryAmountKeywords = listOf(
+            "القيمة", "المبلغ", "المطلوب", "إجمالي", "الاجمالي", "اجمالي",
+            "رصيد", "سداد", "amount", "total", "due"
         )
         val detailKeywords = listOf(
             "الاسم", "المشترك", "العميل", "الشهر", "الفترة", "تاريخ", "الإصدار",
-            "عدد الفواتير", "الاستهلاك", "القراءة", "الحالة", "السداد", "القيمة", "المبلغ", "المطلوب", "إجمالي"
+            "عدد الفواتير", "الاستهلاك", "القراءة", "الحالة", "السداد", "القيمة", "المبلغ",
+            "المطلوب", "إجمالي", "اجمالي", "الفاتورة", "مدفوع", "خطأ", "غير موجود", "لا توجد", "لا يوجد"
         )
 
         val currencyRegex = Regex("""(\d+(?:[.,]\d+)?)\s*(?:جنيه|ج\.م|جم|EGP|LE)""", RegexOption.IGNORE_CASE)
         val numberRegex = Regex("""\b(\d{1,6}(?:[.,]\d{1,2})?)\b""")
 
+        fun isExcludedNumberLine(line: String): Boolean {
+            val l = line.lowercase()
+            return excludedNumberLineKeywords.any { l.contains(it) } &&
+                priorityTotalKeywords.none { l.contains(it) }
+        }
+
         var matchedAmount: String? = null
+        // 1. Priority: line has total/due label AND currency
         for (line in lines) {
-            val cMatch = currencyRegex.find(line)
-            if (cMatch != null) {
-                matchedAmount = cMatch.groupValues[1]
-                break
+            if (priorityTotalKeywords.any { line.contains(it, ignoreCase = true) }) {
+                val cMatch = currencyRegex.find(line) ?: numberRegex.find(line)
+                if (cMatch != null) {
+                    matchedAmount = cMatch.groupValues[1]
+                    break
+                }
             }
         }
+        // 2. Next: any non-excluded line with currency
+        if (matchedAmount == null) {
+            for (line in lines) {
+                if (isExcludedNumberLine(line)) continue
+                val cMatch = currencyRegex.find(line)
+                if (cMatch != null) {
+                    matchedAmount = cMatch.groupValues[1]
+                    break
+                }
+            }
+        }
+        // 3. Next: priority label on one line, number on next line; or secondary amount label on non-excluded line
         if (matchedAmount == null) {
             for (i in lines.indices) {
-                val lineLower = lines[i].lowercase()
-                if (amountKeywords.any { lineLower.contains(it) }) {
-                    val nMatch = numberRegex.find(lines[i])
-                        ?: lines.getOrNull(i + 1)?.let { numberRegex.find(it) }
+                val line = lines[i]
+                if (isExcludedNumberLine(line)) continue
+                val lineLower = line.lowercase()
+                if (priorityTotalKeywords.any { lineLower.contains(it) } || secondaryAmountKeywords.any { lineLower.contains(it) }) {
+                    val nMatch = numberRegex.find(line)
+                        ?: lines.getOrNull(i + 1)?.takeUnless { isExcludedNumberLine(it) }?.let { numberRegex.find(it) }
                     if (nMatch != null) {
                         matchedAmount = nMatch.groupValues[1]
                         break
@@ -1085,7 +1146,7 @@ object AutomationExecutionEngine {
         }
 
         val statusLabel = when {
-            isPaid == true -> "مدفوعة"
+            isPaid == true -> "كل الفواتير مدفوعة"
             isPaid == false -> "مطلوب السداد"
             errorLine != null -> "تعذر الاستعلام"
             else -> "نتيجة الاستعلام"
@@ -1098,24 +1159,27 @@ object AutomationExecutionEngine {
         }
 
         val relevantLines = lines.filter { line ->
-            detailKeywords.any { line.contains(it, ignoreCase = true) } ||
-                paidKeywords.any { line.contains(it, ignoreCase = true) } ||
-                currencyRegex.containsMatchIn(line)
-        }.distinct().take(8)
+            line.length in 3..180 && (
+                detailKeywords.any { line.contains(it, ignoreCase = true) } ||
+                    paidKeywords.any { line.contains(it, ignoreCase = true) } ||
+                    errorKeywords.any { line.contains(it, ignoreCase = true) } ||
+                    currencyRegex.containsMatchIn(line)
+                )
+        }.distinct().take(15)
 
         val detailsText = if (relevantLines.isNotEmpty()) {
             relevantLines.joinToString("\n")
         } else {
-            lines.take(8).joinToString("\n")
+            lines.filter { it.length in 3..180 }.take(15).joinToString("\n")
         }
 
         val spokenText = when {
             isPaid == true && matchedAmount != null && (amountNumeric ?: 0.0) > 0.0 ->
                 "بخصوص $title: الفاتورة مدفوعة، وقيمتها $matchedAmount جنيه."
             isPaid == true ->
-                "بخصوص $title: الفاتورة مدفوعة ولا توجد مبالغ مستحقة."
+                "بخصوص $title: كل الفواتير مدفوعة ولا توجد مبالغ مستحقة."
             matchedAmount != null ->
-                "بخصوص $title: القيمة المطلوبة هي $matchedAmount جنيه مصري."
+                "بخصوص $title: إجمالي الفاتورة المطلوبة هو $matchedAmount جنيه مصري."
             errorLine != null ->
                 "بخصوص $title: $errorLine"
             else ->

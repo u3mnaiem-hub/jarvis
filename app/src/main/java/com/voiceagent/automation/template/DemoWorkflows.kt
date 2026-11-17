@@ -634,6 +634,14 @@ object DemoWorkflows {
                 ),
                 AutomationStep(
                     order = 3,
+                    title = "Scroll Down for Remaining GB",
+                    description = "تمرير الشاشة لإظهار الجيجابايت المتبقية",
+                    actionType = ActionType.SCROLL_FORWARD,
+                    stopOnFailure = false,
+                    delayAfterMs = 1500
+                ),
+                AutomationStep(
+                    order = 4,
                     title = "Read Quota & Announce",
                     description = "استخراج الجيجابايت وتاريخ التجديد ونطقها صوتياً",
                     actionType = ActionType.SCRAPE_AND_SPEAK,
@@ -736,12 +744,12 @@ object DemoWorkflows {
                 AutomationStep(
                     order = 1,
                     title = "Open Water Portal",
-                    description = "فتح بوابة شركة مياه الشرب بالإسكندرية",
+                    description = "فتح صفحة الاستعلام عن فاتورة مياه الإسكندرية",
                     actionType = ActionType.OPEN_URL,
                     isWebStep = true,
-                    url = "https://alexwater.com.eg/",
+                    url = "https://alexwater.com.eg/2016/fatora/",
                     delayAfterMs = 2500,
-                    spokenMessage = "جاري فتح بوابة مياه الإسكندرية"
+                    spokenMessage = "جاري فتح صفحة الاستعلام عن فاتورة المياه"
                 ),
                 AutomationStep(
                     order = 2,
@@ -750,18 +758,21 @@ object DemoWorkflows {
                     actionType = ActionType.SET_TEXT,
                     isWebStep = true,
                     textPayload = paymentCode,
-                    candidateTexts = listOf("رقم السداد الإلكتروني", "رقم السداد", "كود المشترك"),
-                    candidateCssSelectors = listOf("input[name*='code' i]", "input[name*='pay' i]", "input[type='text']"),
+                    cssSelector = "#inquiryForm input[type='text']",
+                    candidateTexts = listOf("رقم السداد الإلكتروني", "أدخل 14 رقم", "رقم السداد"),
+                    candidateCssSelectors = listOf("#inquiryForm input[type='text']", "input[placeholder*='14']", "input[name*='code' i]", "input[name*='pay' i]"),
                     delayAfterMs = 1000
                 ),
                 AutomationStep(
                     order = 3,
                     title = "Click Search",
-                    description = "الضغط على زر استعلام / التالي",
+                    description = "الضغط على زر استعلام الآن",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    selectorText = "استعلام",
-                    candidateTexts = listOf("استعلام", "بحث", "التالي"),
+                    cssSelector = "#submitBtn",
+                    candidateCssSelectors = listOf("#submitBtn", "#inquiryForm button[type='submit']", "button[type='submit']"),
+                    selectorText = "استعلام الآن",
+                    candidateTexts = listOf("استعلام الآن", "استعلام", "بحث", "التالي"),
                     delayAfterMs = 3500
                 ),
                 AutomationStep(
@@ -777,11 +788,28 @@ object DemoWorkflows {
     }
 
     fun createPetrotradeGasBillWorkflow(paymentCode: String = "0302050532061500"): Automation {
+        val normalizedCode = paymentCode.filter { it.isDigit() }.padEnd(16, '0').take(16)
+        val pairs = normalizedCode.chunked(2)
+        val fieldLabels = listOf("محافظة", "منطقة", "يومية", "قطاع", "بلوك", "عمارة", "شقة", "فرعي")
+        val inputSteps = pairs.mapIndexed { index, twoDigits ->
+            val fieldNum = index + 1
+            AutomationStep(
+                order = index + 2,
+                title = "Enter ${fieldLabels[index]} ($twoDigits)",
+                description = "إدخال ${fieldLabels[index]} في الخانة T$fieldNum",
+                actionType = ActionType.SET_TEXT,
+                isWebStep = true,
+                textPayload = twoDigits,
+                cssSelector = "#T$fieldNum",
+                candidateCssSelectors = listOf("#T$fieldNum", "input[name='T$fieldNum']"),
+                delayAfterMs = 200
+            )
+        }
         return Automation(
             id = "macro_alex_gas_petrotrade",
             name = "Petrotrade Gas Bill",
             nameAr = "فاتورة غاز بتروتريد",
-            description = "استعلام عن فاتورة غاز بتروتريد برقم المشترك ($paymentCode) ونطق النتيجة صوتياً.",
+            description = "استعلام عن فاتورة غاز بتروتريد برقم المشترك ($paymentCode) مقسماً إلى 8 خانات ونطق النتيجة صوتياً.",
             category = "Utilities & Bills",
             iconName = "local_fire_department",
             isFavorite = true,
@@ -806,30 +834,22 @@ object DemoWorkflows {
                     url = "https://www.petrotrade.com.eg/billing/billq.aspx",
                     delayAfterMs = 2500,
                     spokenMessage = "جاري فتح موقع بتروتريد للغاز"
-                ),
+                )
+            ) + inputSteps + listOf(
                 AutomationStep(
-                    order = 2,
-                    title = "Enter Customer Number",
-                    description = "إدخال كود المشترك المكون من 16 رقماً",
-                    actionType = ActionType.SET_TEXT,
-                    isWebStep = true,
-                    textPayload = paymentCode,
-                    candidateTexts = listOf("رقم المشترك", "كود العميل", "السداد الإلكتروني"),
-                    candidateCssSelectors = listOf("input[name*='txt' i]", "input[type='text']"),
-                    delayAfterMs = 1000
-                ),
-                AutomationStep(
-                    order = 3,
+                    order = inputSteps.size + 2,
                     title = "Click Search",
-                    description = "الضغط على زر استعراض الفواتير / بحث",
+                    description = "الضغط على زر استعلام",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    selectorText = "استعراض",
-                    candidateTexts = listOf("استعراض الفواتير", "عرض", "بحث", "استعلام"),
+                    cssSelector = "#BCrn",
+                    candidateCssSelectors = listOf("#BCrn", "input[name='BCrn']", "input[type='submit']"),
+                    selectorText = "استعلام",
+                    candidateTexts = listOf("استعلام", "استعراض الفواتير", "عرض", "بحث"),
                     delayAfterMs = 3500
                 ),
                 AutomationStep(
-                    order = 4,
+                    order = inputSteps.size + 3,
                     title = "Read & Announce Bill",
                     description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
                     actionType = ActionType.SCRAPE_AND_SPEAK,

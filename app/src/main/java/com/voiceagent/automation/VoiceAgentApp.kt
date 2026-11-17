@@ -74,7 +74,7 @@ class VoiceAgentApp : Application() {
 
     companion object {
         /** Bump to force re-seeding of the built-in router workflows on next app start. */
-        private const val ROUTER_WORKFLOWS_VERSION = 5
+        private const val ROUTER_WORKFLOWS_VERSION = 6
 
         lateinit var instance: VoiceAgentApp
             private set

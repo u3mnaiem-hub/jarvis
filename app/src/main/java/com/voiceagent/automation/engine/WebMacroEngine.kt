@@ -57,6 +57,14 @@ class WebMacroEngine(private val context: Context) {
             settings.loadWithOverviewMode = true
             settings.javaScriptCanOpenWindowsAutomatically = true
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
+            isVerticalScrollBarEnabled = true
+            isHorizontalScrollBarEnabled = true
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
 
             layout(0, 0, 1080, 1920)
             webViewClient = object : WebViewClient() {

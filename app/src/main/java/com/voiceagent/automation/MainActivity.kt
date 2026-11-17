@@ -133,6 +133,7 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     val activeWebView by WebMacroEngine.activeWebViewFlow.collectAsState()
                     val latestReport by AutomationExecutionEngine.latestReportFlow.collectAsState()
+                    val isWebViewPinned by AutomationExecutionEngine.isWebViewPinnedFlow.collectAsState()
                     var hideLiveWebView by remember(activeWebView) { mutableStateOf(false) }
 
                     Box(
@@ -262,19 +263,56 @@ class MainActivity : ComponentActivity() {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .background(Color(0xFF065F46))
-                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                            .background(if (isWebViewPinned) Color(0xFFB45309) else Color(0xFF065F46))
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            text = "Live Web Automation",
+                                            text = if (isWebViewPinned) "الشاشة مثبتة للقراءة" else "عرض الموقع المباشر",
                                             color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
                                         )
-                                        TextButton(onClick = { hideLiveWebView = true }) {
-                                            Text("Hide", color = Color.White, fontSize = 12.sp)
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (!isWebViewPinned) {
+                                                Button(
+                                                    onClick = { AutomationExecutionEngine.setWebViewPinned(true) },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Icon(Icons.Default.PushPin, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("تثبيت الشاشة", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            } else {
+                                                Button(
+                                                    onClick = { AutomationExecutionEngine.setWebViewPinned(false) },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                    shape = RoundedCornerShape(8.dp)
+                                                ) {
+                                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(15.dp), tint = Color.White)
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("متابعة", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    if (isWebViewPinned) AutomationExecutionEngine.setWebViewPinned(false)
+                                                    hideLiveWebView = true
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("إخفاء", color = Color.White, fontSize = 11.5.sp)
+                                            }
                                         }
                                     }
                                     AndroidView(
@@ -360,6 +398,20 @@ class MainActivity : ComponentActivity() {
                                                 lineHeight = 20.sp,
                                                 modifier = Modifier.fillMaxWidth().padding(10.dp)
                                             )
+                                        }
+                                        if (activeWebView != null) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    AutomationExecutionEngine.setWebViewPinned(true)
+                                                    hideLiveWebView = false
+                                                    AutomationExecutionEngine.dismissReport()
+                                                },
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Icon(Icons.Default.Web, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("تصفح وتمرير صفحة الموقع (تثبيت الشاشة)", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
                                 },

@@ -927,7 +927,7 @@ object AutomationExecutionEngine {
             }
 
             ActionType.SCRAPE_AND_SPEAK -> {
-                val texts = service.extractAllVisibleTexts()
+                val texts = service?.extractAllVisibleTexts() ?: emptyList()
                 Log.d(TAG, "SCRAPE_AND_SPEAK visible texts (${texts.size}): $texts")
                 val speechMessage = parseAndFormatQuotaInfo(texts, step.spokenMessage ?: step.textPayload)
                 TextToSpeechManager.speak(speechMessage)
@@ -1036,6 +1036,46 @@ object AutomationExecutionEngine {
                 sb.append("، ومتبقي على التجديد ").append(matchedDays).append(" يوم")
             }
             return sb.toString()
+        }
+
+        // Check for Utility Bill patterns (Electricity / Water / Petrotrade Gas)
+        val isBillQuery = texts.any { line ->
+            line.contains("فاتورة", ignoreCase = true) ||
+                line.contains("سداد", ignoreCase = true) ||
+                line.contains("مستحق", ignoreCase = true) ||
+                line.contains("كهرباء", ignoreCase = true) ||
+                line.contains("مياه", ignoreCase = true) ||
+                line.contains("بتروتريد", ignoreCase = true) ||
+                line.contains("petrotrade", ignoreCase = true)
+        }
+
+        if (isBillQuery) {
+            val isPaid = texts.any {
+                it.contains("تم السداد", ignoreCase = true) ||
+                    it.contains("مدفوعة", ignoreCase = true) ||
+                    it.contains("لا توجد فواتير مستحقة", ignoreCase = true) ||
+                    it.contains("لا توجد مبالغ مستحقة", ignoreCase = true)
+            }
+            if (isPaid) {
+                return "الفاتورة مسددة بالكامل، ولا توجد مبالغ مستحقة حالياً."
+            }
+
+            val notIssued = texts.any {
+                it.contains("لم تصدر بعد", ignoreCase = true) ||
+                    it.contains("غير متاحة حاليا", ignoreCase = true)
+            }
+            if (notIssued) {
+                return "الفاتورة لم تصدر بعد."
+            }
+
+            val billAmountRegex = Regex("""(\d+(?:[.,]\d+)?)\s*(?:جنيه|ج\.م|EGP|LE)""", RegexOption.IGNORE_CASE)
+            for (line in texts) {
+                val bMatch = billAmountRegex.find(line)
+                if (bMatch != null) {
+                    val amount = bMatch.groupValues[1]
+                    return "قيمة الفاتورة المستحقة هي $amount جنيه مصري."
+                }
+            }
         }
 
         val hasLoginHint = texts.any { it.contains("تسجيل الدخول", ignoreCase = true) || it.contains("Log in", ignoreCase = true) || it.contains("كلمة المرور", ignoreCase = true) }

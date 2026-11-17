@@ -38,16 +38,28 @@ class VoiceAgentApp : Application() {
                         ?: "Smart-TV"
                     val enableTvWorkflow = DemoWorkflows.createEnableTvInternetWorkflow(deviceName = customDevice)
                     val disableTvWorkflow = DemoWorkflows.createDisableTvInternetWorkflow(deviceName = customDevice)
-                    val myWeWorkflow = DemoWorkflows.createMyWeQuotaWorkflow()
+                    val utilities = listOf(
+                        DemoWorkflows.createMyWeQuotaWorkflow(),
+                        DemoWorkflows.createAlexElectricityBillWorkflow(),
+                        DemoWorkflows.createAlexWaterBillWorkflow(),
+                        DemoWorkflows.createPetrotradeGasBillWorkflow()
+                    )
                     val deviceWorkflows = DemoWorkflows.getDeviceRouterWorkflows()
-                    db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow, myWeWorkflow) + deviceWorkflows)
+                    db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow) + utilities + deviceWorkflows)
                     prefs.edit().putInt("router_workflows_version", ROUTER_WORKFLOWS_VERSION).apply()
-                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows & My WE quota macro")
+                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows & utilities macros")
                 } else {
-                    // Ensure My WE workflow exists
-                    val existingWe = db.automationDao().getAutomationById("macro_check_my_we_quota")
-                    if (existingWe == null) {
-                        db.automationDao().insertOrUpdate(DemoWorkflows.createMyWeQuotaWorkflow())
+                    val utilities = listOf(
+                        DemoWorkflows.createMyWeQuotaWorkflow(),
+                        DemoWorkflows.createAlexElectricityBillWorkflow(),
+                        DemoWorkflows.createAlexWaterBillWorkflow(),
+                        DemoWorkflows.createPetrotradeGasBillWorkflow()
+                    )
+                    for (macro in utilities) {
+                        val existing = db.automationDao().getAutomationById(macro.id)
+                        if (existing == null) {
+                            db.automationDao().insertOrUpdate(macro)
+                        }
                     }
                 }
 

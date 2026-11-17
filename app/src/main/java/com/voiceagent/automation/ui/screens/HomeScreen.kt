@@ -841,18 +841,36 @@ fun HomeScreen(
                         Text(
                             text = auto.nameAr.ifBlank { auto.name },
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontSize = 11.5.sp,
+                            lineHeight = 15.sp,
                             color = LightTextPrimary,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    db.automationDao().insertOrUpdate(auto.copy(isFavorite = false))
+                                    Toast.makeText(context, "تم إخفاء المهمة من الرئيسية (متاحة في 'عرض الكل')", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.VisibilityOff,
+                                contentDescription = "إخفاء المهمة",
+                                tint = LightTextSecondary,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
                         Button(
                             onClick = { AutomationExecutionEngine.executeAutomation(context, auto) },
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp)
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(3.dp))

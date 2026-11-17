@@ -643,12 +643,206 @@ object DemoWorkflows {
         )
     }
 
+    fun createAlexElectricityBillWorkflow(paymentCode: String = "8020110103637011"): Automation {
+        return Automation(
+            id = "macro_alex_electricity_bill",
+            name = "Alexandria Electricity Bill",
+            nameAr = "فاتورة كهرباء الإسكندرية",
+            description = "استعلام عن فاتورة كهرباء الإسكندرية بالرقم الآلي ($paymentCode) ونطق النتيجة صوتياً.",
+            category = "Utilities & Bills",
+            iconName = "bolt",
+            isFavorite = true,
+            isEnabled = true,
+            voicePhrases = listOf(
+                "Check electricity bill",
+                "Alexandria electricity",
+                "فاتورة الكهربا",
+                "فاتورة الكهرباء",
+                "استعلام فاتورة الكهرباء",
+                "كام فاتورة الكهرباء",
+                "كهرباء اسكندرية",
+                "فاتورة كهرباء اسكندرية",
+                "احسب فاتورة الكهرباء"
+            ),
+            steps = listOf(
+                AutomationStep(
+                    order = 1,
+                    title = "Open Electricity Portal",
+                    description = "فتح بوابة الاستعلام عن فواتير كهرباء الإسكندرية",
+                    actionType = ActionType.OPEN_URL,
+                    isWebStep = true,
+                    url = "https://aedco.gov.eg/",
+                    delayAfterMs = 2500,
+                    spokenMessage = "جاري فتح بوابة كهرباء الإسكندرية"
+                ),
+                AutomationStep(
+                    order = 2,
+                    title = "Enter Payment Number",
+                    description = "إدخال الرقم الآلي للسداد الإلكتروني",
+                    actionType = ActionType.SET_TEXT,
+                    isWebStep = true,
+                    textPayload = paymentCode,
+                    candidateTexts = listOf("رقم السداد", "الرقم الالي", "الرقم الآلي", "كود السداد"),
+                    candidateCssSelectors = listOf("input[name*='pay' i]", "input[name*='code' i]", "input[type='text']"),
+                    delayAfterMs = 1000
+                ),
+                AutomationStep(
+                    order = 3,
+                    title = "Click Search",
+                    description = "الضغط على زر استعلام / بحث",
+                    actionType = ActionType.CLICK_ELEMENT,
+                    isWebStep = true,
+                    selectorText = "استعلام",
+                    candidateTexts = listOf("استعلام", "بحث", "عرض الفاتورة"),
+                    delayAfterMs = 2500
+                ),
+                AutomationStep(
+                    order = 4,
+                    title = "Read & Announce Bill",
+                    description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
+                    actionType = ActionType.SCRAPE_AND_SPEAK,
+                    delayAfterMs = 1000
+                )
+            )
+        )
+    }
+
+    fun createAlexWaterBillWorkflow(paymentCode: String = "05010000054933"): Automation {
+        return Automation(
+            id = "macro_alex_water_bill",
+            name = "Alexandria Water Bill",
+            nameAr = "فاتورة مياه الإسكندرية",
+            description = "استعلام عن فاتورة مياه الشرب بالإسكندرية برقم السداد ($paymentCode) ونطق النتيجة صوتياً.",
+            category = "Utilities & Bills",
+            iconName = "water",
+            isFavorite = true,
+            isEnabled = true,
+            voicePhrases = listOf(
+                "Check water bill",
+                "Alexandria water",
+                "فاتورة المية",
+                "فاتورة المياه",
+                "استعلام فاتورة المياه",
+                "كام فاتورة المية",
+                "مياه اسكندرية",
+                "فاتورة مياه اسكندرية",
+                "احسب فاتورة المية"
+            ),
+            steps = listOf(
+                AutomationStep(
+                    order = 1,
+                    title = "Open Water Portal",
+                    description = "فتح بوابة شركة مياه الشرب بالإسكندرية",
+                    actionType = ActionType.OPEN_URL,
+                    isWebStep = true,
+                    url = "https://alexwater.com.eg/",
+                    delayAfterMs = 2500,
+                    spokenMessage = "جاري فتح بوابة مياه الإسكندرية"
+                ),
+                AutomationStep(
+                    order = 2,
+                    title = "Enter Payment Code",
+                    description = "إدخال كود السداد الإلكتروني",
+                    actionType = ActionType.SET_TEXT,
+                    isWebStep = true,
+                    textPayload = paymentCode,
+                    candidateTexts = listOf("رقم السداد الإلكتروني", "رقم السداد", "كود المشترك"),
+                    candidateCssSelectors = listOf("input[name*='code' i]", "input[name*='pay' i]", "input[type='text']"),
+                    delayAfterMs = 1000
+                ),
+                AutomationStep(
+                    order = 3,
+                    title = "Click Search",
+                    description = "الضغط على زر استعلام / التالي",
+                    actionType = ActionType.CLICK_ELEMENT,
+                    isWebStep = true,
+                    selectorText = "استعلام",
+                    candidateTexts = listOf("استعلام", "بحث", "التالي"),
+                    delayAfterMs = 2500
+                ),
+                AutomationStep(
+                    order = 4,
+                    title = "Read & Announce Bill",
+                    description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
+                    actionType = ActionType.SCRAPE_AND_SPEAK,
+                    delayAfterMs = 1000
+                )
+            )
+        )
+    }
+
+    fun createPetrotradeGasBillWorkflow(paymentCode: String = "0302050532061500"): Automation {
+        return Automation(
+            id = "macro_alex_gas_petrotrade",
+            name = "Petrotrade Gas Bill",
+            nameAr = "فاتورة غاز بتروتريد",
+            description = "استعلام عن فاتورة غاز بتروتريد برقم المشترك ($paymentCode) ونطق النتيجة صوتياً.",
+            category = "Utilities & Bills",
+            iconName = "local_fire_department",
+            isFavorite = true,
+            isEnabled = true,
+            voicePhrases = listOf(
+                "Check gas bill",
+                "Petrotrade gas",
+                "فاتورة الغاز",
+                "استعلام فاتورة الغاز",
+                "كام فاتورة الغاز",
+                "غاز بتروتريد",
+                "فاتورة بتروتريد",
+                "احسب فاتورة الغاز"
+            ),
+            steps = listOf(
+                AutomationStep(
+                    order = 1,
+                    title = "Open Petrotrade Portal",
+                    description = "فتح موقع بتروتريد للاستعلام عن فواتير الغاز",
+                    actionType = ActionType.OPEN_URL,
+                    isWebStep = true,
+                    url = "https://www.petrotrade.com.eg/billing/billq.aspx",
+                    delayAfterMs = 2500,
+                    spokenMessage = "جاري فتح موقع بتروتريد للغاز"
+                ),
+                AutomationStep(
+                    order = 2,
+                    title = "Enter Customer Number",
+                    description = "إدخال كود المشترك المكون من 16 رقماً",
+                    actionType = ActionType.SET_TEXT,
+                    isWebStep = true,
+                    textPayload = paymentCode,
+                    candidateTexts = listOf("رقم المشترك", "كود العميل", "السداد الإلكتروني"),
+                    candidateCssSelectors = listOf("input[name*='txt' i]", "input[type='text']"),
+                    delayAfterMs = 1000
+                ),
+                AutomationStep(
+                    order = 3,
+                    title = "Click Search",
+                    description = "الضغط على زر استعراض الفواتير / بحث",
+                    actionType = ActionType.CLICK_ELEMENT,
+                    isWebStep = true,
+                    selectorText = "استعراض",
+                    candidateTexts = listOf("استعراض الفواتير", "عرض", "بحث", "استعلام"),
+                    delayAfterMs = 2500
+                ),
+                AutomationStep(
+                    order = 4,
+                    title = "Read & Announce Bill",
+                    description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
+                    actionType = ActionType.SCRAPE_AND_SPEAK,
+                    delayAfterMs = 1000
+                )
+            )
+        )
+    }
+
     fun getAllInitialAutomations(): List<Automation> {
         return listOf(
             createEnableTvInternetWorkflow(),
             createDisableTvInternetWorkflow(),
             createMasrofyExpenseWorkflow(),
-            createMyWeQuotaWorkflow()
+            createMyWeQuotaWorkflow(),
+            createAlexElectricityBillWorkflow(),
+            createAlexWaterBillWorkflow(),
+            createPetrotradeGasBillWorkflow()
         ) + getDeviceRouterWorkflows()
     }
 }

@@ -84,7 +84,7 @@ private class JarvisWebSnifferBridge(private val appContext: android.content.Con
                 cssSelector = "[id='Frm_Username']",
                 selectorResourceId = "Frm_Username",
                 textPayload = cleanUser,
-                delayAfterMs = 400L
+                delayAfterMs = 2000L
             )
         )
         AutomationRecorderEngine.addRecordedStep(
@@ -96,7 +96,7 @@ private class JarvisWebSnifferBridge(private val appContext: android.content.Con
                 credentialKey = "router_admin_pass",
                 cssSelector = "[id='Frm_Password']",
                 selectorResourceId = "Frm_Password",
-                delayAfterMs = 400L
+                delayAfterMs = 2000L
             )
         )
         AutomationRecorderEngine.addRecordedStep(

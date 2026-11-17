@@ -62,7 +62,7 @@ data class AutomationStep(
     
     // Timing & Wait
     val delayBeforeMs: Long = 200,
-    val delayAfterMs: Long = 400,
+    val delayAfterMs: Long = 2000,
     val timeoutSeconds: Int = 10,
     val maxRetries: Int = 2,
     

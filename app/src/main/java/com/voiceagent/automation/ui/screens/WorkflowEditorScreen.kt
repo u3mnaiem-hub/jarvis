@@ -262,7 +262,7 @@ fun WorkflowEditorScreen(
                                     cssSelector = "[id='Frm_Username']",
                                     selectorResourceId = "Frm_Username",
                                     textPayload = savedUser,
-                                    delayAfterMs = 400L
+                                    delayAfterMs = 2000L
                                 ),
                                 AutomationStep(
                                     title = "Inject Stored Router Password (Credentials)",
@@ -272,7 +272,7 @@ fun WorkflowEditorScreen(
                                     credentialKey = "router_admin_pass",
                                     cssSelector = "[id='Frm_Password']",
                                     selectorResourceId = "Frm_Password",
-                                    delayAfterMs = 400L
+                                    delayAfterMs = 2000L
                                 ),
                                 AutomationStep(
                                     title = "Click Login (LoginId)",
@@ -377,20 +377,22 @@ fun WorkflowEditorScreen(
 
     // Add / Edit Step Dialog
     if (isStepDialogVisible) {
-        StepEditorDialog(
-            initialStep = currentEditingStep,
-            onDismiss = { isStepDialogVisible = false },
-            onSave = { updatedStep ->
-                val mutable = steps.toMutableList()
-                if (editingStepIndex != null && editingStepIndex in mutable.indices) {
-                    mutable[editingStepIndex!!] = updatedStep
-                } else {
-                    mutable.add(updatedStep)
+        key(currentEditingStep.id, editingStepIndex) {
+            StepEditorDialog(
+                initialStep = currentEditingStep,
+                onDismiss = { isStepDialogVisible = false },
+                onSave = { updatedStep ->
+                    val mutable = steps.toMutableList()
+                    if (editingStepIndex != null && editingStepIndex in mutable.indices) {
+                        mutable[editingStepIndex!!] = updatedStep
+                    } else {
+                        mutable.add(updatedStep)
+                    }
+                    steps = mutable.mapIndexed { idx, s -> s.copy(order = idx + 1) }
+                    isStepDialogVisible = false
                 }
-                steps = mutable.mapIndexed { idx, s -> s.copy(order = idx + 1) }
-                isStepDialogVisible = false
-            }
-        )
+            )
+        }
     }
 }
 
@@ -726,7 +728,7 @@ fun StepEditorDialog(
                         targetRadioValue = if (isRadioStep) rVal else initialStep.targetRadioValue,
                         textPayload = if (isRadioStep) "Enable:ParentCtrl:{i}|$rVal" else textPayload.ifBlank { null },
                         credentialKey = credentialKey.ifBlank { null },
-                        delayAfterMs = delayAfterMs.toLongOrNull() ?: if (isRadioStep) 2000L else 400L,
+                        delayAfterMs = delayAfterMs.toLongOrNull() ?: 2000L,
                         timeoutSeconds = timeoutSeconds.toIntOrNull() ?: 12
                     )
                     onSave(updated)

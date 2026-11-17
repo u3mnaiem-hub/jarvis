@@ -57,6 +57,8 @@ fun RecorderScreen(
     }
 
     var isManualStepDialogVisible by remember { mutableStateOf(false) }
+    var editingStepIndex by remember { mutableStateOf<Int?>(null) }
+    var currentEditingStep by remember { mutableStateOf<AutomationStep?>(null) }
 
     Scaffold(
         topBar = {
@@ -375,12 +377,21 @@ fun RecorderScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "${step.actionType.labelEn} • ${step.selectorText ?: step.selectorResourceId ?: step.targetPackage ?: "Coordinate"}",
+                                    text = "${step.actionType.labelEn} • ${step.selectorText ?: step.selectorResourceId ?: step.targetPackage ?: "Coordinate"} • ⏳ ${step.delayAfterMs}ms",
                                     fontSize = 11.sp,
                                     color = LightTextSecondary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+                            }
+                            IconButton(
+                                onClick = {
+                                    editingStepIndex = index
+                                    currentEditingStep = step
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit Step", tint = Blue600, modifier = Modifier.size(18.dp))
                             }
                             IconButton(
                                 onClick = { AutomationRecorderEngine.removeStepAt(index) },
@@ -392,6 +403,24 @@ fun RecorderScreen(
                     }
                 }
             }
+        }
+    }
+
+    // Edit existing recorded step modal
+    if (editingStepIndex != null && currentEditingStep != null) {
+        key(currentEditingStep!!.id, editingStepIndex) {
+            StepEditorDialog(
+                initialStep = currentEditingStep!!,
+                onDismiss = {
+                    editingStepIndex = null
+                    currentEditingStep = null
+                },
+                onSave = { updatedStep ->
+                    AutomationRecorderEngine.updateStepAt(editingStepIndex!!, updatedStep)
+                    editingStepIndex = null
+                    currentEditingStep = null
+                }
+            )
         }
     }
 

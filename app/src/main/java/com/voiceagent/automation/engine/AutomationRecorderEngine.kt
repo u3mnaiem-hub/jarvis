@@ -201,4 +201,12 @@ object AutomationRecorderEngine {
             _recordedStepsFlow.value = reindexed
         }
     }
+
+    fun updateStepAt(index: Int, updatedStep: AutomationStep) {
+        val currentList = _recordedStepsFlow.value.toMutableList()
+        if (index in currentList.indices) {
+            currentList[index] = updatedStep.copy(order = index + 1)
+            _recordedStepsFlow.value = currentList
+        }
+    }
 }

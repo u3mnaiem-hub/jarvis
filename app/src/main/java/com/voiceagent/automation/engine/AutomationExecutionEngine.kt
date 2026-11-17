@@ -926,6 +926,14 @@ object AutomationExecutionEngine {
                 return StepResult(true, actionAttempted = true, actionConfirmed = true)
             }
 
+            ActionType.SCRAPE_AND_SPEAK -> {
+                val texts = service.extractAllVisibleTexts()
+                Log.d(TAG, "SCRAPE_AND_SPEAK visible texts (${texts.size}): $texts")
+                val speechMessage = parseAndFormatQuotaInfo(texts, step.spokenMessage ?: step.textPayload)
+                TextToSpeechManager.speak(speechMessage)
+                return StepResult(true, speechMessage, actionAttempted = true, actionConfirmed = true)
+            }
+
             else -> {
                 Log.w(TAG, "Unhandled action type: ${step.actionType}")
                 return StepResult(true, actionAttempted = true, actionConfirmed = true)
@@ -966,8 +974,94 @@ object AutomationExecutionEngine {
         } ?: false
     }
 
+    private fun parseAndFormatQuotaInfo(texts: List<String>, fallbackMessage: String?): String {
+        if (texts.isEmpty()) {
+            return fallbackMessage ?: "تعذر قراءة بيانات الشاشة، يرجى التأكد من فتح التطبيق."
+        }
+
+        val quotaRegex = Regex("""(\d+(?:[.,]\d+)?)\s*(?:جيجابايت|جيجا|GB|GiB)""", RegexOption.IGNORE_CASE)
+        val dateRegex = Regex("""(?:تجديد|تاريخ التجديد|Renewal|Renew|Expires?|صالح حتى|تاريخ الانتهاء)[:\s-]*([0-9\/\-.]+|[0-9]{1,2}\s+[أ-ي\w]+(?:\s+[0-9]{4})?)""", RegexOption.IGNORE_CASE)
+        val daysRegex = Regex("""(\d+)\s*(?:أيام|يوم|days?)""", RegexOption.IGNORE_CASE)
+
+        var matchedRemaining: String? = null
+        var matchedTotal: String? = null
+        var matchedDate: String? = null
+        var matchedDays: String? = null
+
+        for (line in texts) {
+            val qMatches = quotaRegex.findAll(line).toList()
+            if (qMatches.isNotEmpty()) {
+                if (matchedRemaining == null) {
+                    matchedRemaining = qMatches[0].groupValues[1]
+                }
+                if (qMatches.size > 1 && matchedTotal == null) {
+                    matchedTotal = qMatches[1].groupValues[1]
+                }
+            }
+
+            if (matchedDate == null) {
+                val dMatch = dateRegex.find(line)
+                if (dMatch != null) {
+                    matchedDate = dMatch.groupValues[1].trim()
+                }
+            }
+
+            if (matchedDays == null && (line.contains("تجديد") || line.contains("متبقي") || line.contains("ينتهي"))) {
+                val daysMatch = daysRegex.find(line)
+                if (daysMatch != null) {
+                    matchedDays = daysMatch.groupValues[1].trim()
+                }
+            }
+        }
+
+        if (matchedRemaining == null) {
+            val gbIndex = texts.indexOfFirst { it.equals("GB", ignoreCase = true) || it.equals("جيجابايت", ignoreCase = true) || it.equals("جيجا", ignoreCase = true) }
+            if (gbIndex > 0) {
+                val prev = texts[gbIndex - 1].trim()
+                if (prev.matches(Regex("""\d+(?:[.,]\d+)?"""))) {
+                    matchedRemaining = prev
+                }
+            }
+        }
+
+        if (matchedRemaining != null) {
+            val sb = StringBuilder("متبقي في باقة وي ")
+            sb.append(matchedRemaining).append(" جيجابايت")
+            if (matchedTotal != null) {
+                sb.append(" من إجمالي ").append(matchedTotal).append(" جيجابايت")
+            }
+            if (!matchedDate.isNullOrBlank()) {
+                sb.append("، وتاريخ التجديد يوم ").append(matchedDate)
+            } else if (!matchedDays.isNullOrBlank()) {
+                sb.append("، ومتبقي على التجديد ").append(matchedDays).append(" يوم")
+            }
+            return sb.toString()
+        }
+
+        val hasLoginHint = texts.any { it.contains("تسجيل الدخول", ignoreCase = true) || it.contains("Log in", ignoreCase = true) || it.contains("كلمة المرور", ignoreCase = true) }
+        if (hasLoginHint) {
+            return "تطبيق ماي وي يطلب تسجيل الدخول. يرجى تسجيل الدخول أولاً لتتمكن من فحص الباقة تلقائياً."
+        }
+
+        return fallbackMessage ?: "تم فتح تطبيق ماي وي، ولكن لم أتمكن من العثور على أرقام الباقة بدقة على الشاشة الحالية."
+    }
+
     private fun launchTargetPackage(context: Context, pkg: String): Boolean {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
+        var launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
+        if (launchIntent == null && (pkg.contains("we", ignoreCase = true) || pkg.contains("telecom", ignoreCase = true))) {
+            try {
+                val installed = context.packageManager.getInstalledApplications(0)
+                val weApp = installed.firstOrNull {
+                    it.packageName.contains("telecomegypt", ignoreCase = true) ||
+                        it.packageName.contains("prod.we", ignoreCase = true) ||
+                        context.packageManager.getApplicationLabel(it).toString().contains("My WE", ignoreCase = true) ||
+                        context.packageManager.getApplicationLabel(it).toString().contains("وي", ignoreCase = true)
+                }
+                if (weApp != null) {
+                    launchIntent = context.packageManager.getLaunchIntentForPackage(weApp.packageName)
+                }
+            } catch (_: Exception) {}
+        }
         if (launchIntent != null) {
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(launchIntent)

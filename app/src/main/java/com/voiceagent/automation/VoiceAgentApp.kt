@@ -38,10 +38,17 @@ class VoiceAgentApp : Application() {
                         ?: "Smart-TV"
                     val enableTvWorkflow = DemoWorkflows.createEnableTvInternetWorkflow(deviceName = customDevice)
                     val disableTvWorkflow = DemoWorkflows.createDisableTvInternetWorkflow(deviceName = customDevice)
+                    val myWeWorkflow = DemoWorkflows.createMyWeQuotaWorkflow()
                     val deviceWorkflows = DemoWorkflows.getDeviceRouterWorkflows()
-                    db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow) + deviceWorkflows)
+                    db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow, myWeWorkflow) + deviceWorkflows)
                     prefs.edit().putInt("router_workflows_version", ROUTER_WORKFLOWS_VERSION).apply()
-                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows (v$ROUTER_WORKFLOWS_VERSION) for device: $customDevice + 4 target devices")
+                    Log.i("VoiceAgentApp", "Seeded/upgraded ZTE H188 WebMacro workflows & My WE quota macro")
+                } else {
+                    // Ensure My WE workflow exists
+                    val existingWe = db.automationDao().getAutomationById("macro_check_my_we_quota")
+                    if (existingWe == null) {
+                        db.automationDao().insertOrUpdate(DemoWorkflows.createMyWeQuotaWorkflow())
+                    }
                 }
 
             } catch (e: Exception) {

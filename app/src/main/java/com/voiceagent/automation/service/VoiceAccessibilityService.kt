@@ -369,6 +369,29 @@ class VoiceAccessibilityService : AccessibilityService() {
     // Core Node Finder & Interaction Utilities
     // ==========================================
 
+    fun extractAllVisibleTexts(): List<String> {
+        val texts = mutableListOf<String>()
+        fun collect(node: AccessibilityNodeInfo?) {
+            if (node == null) return
+            val t = node.text?.toString()?.trim()
+            if (!t.isNullOrBlank()) texts.add(t)
+            val d = node.contentDescription?.toString()?.trim()
+            if (!d.isNullOrBlank() && d != t) texts.add(d)
+            for (i in 0 until node.childCount) {
+                collect(node.getChild(i))
+            }
+        }
+        rootInActiveWindow?.let { collect(it) }
+        try {
+            for (w in windows) {
+                w.root?.let { collect(it) }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error traversing windows for visible texts: ${e.message}")
+        }
+        return texts.distinct()
+    }
+
     fun findNode(
         resourceId: String? = null,
         text: String? = null,

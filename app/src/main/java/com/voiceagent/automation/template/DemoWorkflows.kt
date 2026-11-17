@@ -592,11 +592,63 @@ object DemoWorkflows {
         )
     }
 
+    fun createMyWeQuotaWorkflow(): Automation {
+        return Automation(
+            id = "macro_check_my_we_quota",
+            name = "Check My WE Quota",
+            nameAr = "استعلام عن باقة وي",
+            description = "يفتح تطبيق My WE تلقائياً، ينتظر تحميل الصفحة الرئيسية، يستخرج الجيجابايت المتبقية وتاريخ تجديد الباقة، وينطقها بصوت جارفيس.",
+            category = "Internet & Utilities",
+            iconName = "wifi",
+            isFavorite = true,
+            isEnabled = true,
+            voicePhrases = listOf(
+                "Check WE quota",
+                "Check my internet quota",
+                "Jarvis check we quota",
+                "استعلم عن باقة وي",
+                "باقي كام جيجا في النت",
+                "شوف باقي كام في باقة وي",
+                "باقي كام جيجا في وي",
+                "استعلام عن باقة النت",
+                "باقة النت وي",
+                "اعرف رصيد النت",
+                "رصيد باقة وي"
+            ),
+            steps = listOf(
+                AutomationStep(
+                    order = 1,
+                    title = "Launch My WE App",
+                    description = "يفتح تطبيق My WE على الهاتف",
+                    actionType = ActionType.LAUNCH_APP,
+                    targetPackage = "prod.we.telecomegypt",
+                    delayAfterMs = 4000,
+                    spokenMessage = "جاري فتح تطبيق ماي وي للفحص"
+                ),
+                AutomationStep(
+                    order = 2,
+                    title = "Wait for Dashboard to Load",
+                    description = "انتظار ظهور بيانات الباقة على الشاشة",
+                    actionType = ActionType.DELAY,
+                    delayAfterMs = 3500
+                ),
+                AutomationStep(
+                    order = 3,
+                    title = "Read Quota & Announce",
+                    description = "استخراج الجيجابايت وتاريخ التجديد ونطقها صوتياً",
+                    actionType = ActionType.SCRAPE_AND_SPEAK,
+                    delayAfterMs = 1000
+                )
+            )
+        )
+    }
+
     fun getAllInitialAutomations(): List<Automation> {
         return listOf(
             createEnableTvInternetWorkflow(),
             createDisableTvInternetWorkflow(),
-            createMasrofyExpenseWorkflow()
+            createMasrofyExpenseWorkflow(),
+            createMyWeQuotaWorkflow()
         ) + getDeviceRouterWorkflows()
     }
 }

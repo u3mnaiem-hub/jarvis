@@ -105,7 +105,7 @@ object AutomationRecorderEngine {
         ownPackage: String,
         overlayViewIdSuffix: String,
         overlayContentDescription: String,
-        trailingWindowMs: Long = 500L
+        trailingWindowMs: Long = 200L
     ): List<AutomationStep> {
         val result = steps.filterNot { s ->
             (s.selectorResourceId?.endsWith(overlayViewIdSuffix) == true) ||

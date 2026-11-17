@@ -7,7 +7,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,12 +28,14 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.voiceagent.automation.engine.AutomationExecutionEngine
 import com.voiceagent.automation.engine.WebMacroEngine
 import com.voiceagent.automation.security.SafeModeManager
 import com.voiceagent.automation.service.AccessibilityControlHelper
 import com.voiceagent.automation.ui.navigation.Screen
 import com.voiceagent.automation.ui.screens.*
 import com.voiceagent.automation.ui.theme.VoiceAgentTheme
+import com.voiceagent.automation.voice.TextToSpeechManager
 
 data class BottomNavItem(
     val screen: Screen,
@@ -128,6 +132,7 @@ class MainActivity : ComponentActivity() {
             }
                 ) { innerPadding ->
                     val activeWebView by WebMacroEngine.activeWebViewFlow.collectAsState()
+                    val latestReport by AutomationExecutionEngine.latestReportFlow.collectAsState()
                     var hideLiveWebView by remember(activeWebView) { mutableStateOf(false) }
 
                     Box(
@@ -282,6 +287,99 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+                        }
+
+                        latestReport?.let { report ->
+                            val badgeColor = when (report.isPaid) {
+                                true -> Color(0xFF059669)
+                                false -> Color(0xFFD97706)
+                                null -> Color(0xFF2563EB)
+                            }
+                            AlertDialog(
+                                onDismissRequest = {},
+                                title = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (report.isPaid == true) Icons.Default.CheckCircle else Icons.Default.ReceiptLong,
+                                            contentDescription = null,
+                                            tint = badgeColor
+                                        )
+                                        Text(
+                                            text = report.title,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 17.sp
+                                        )
+                                    }
+                                },
+                                text = {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 360.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Surface(
+                                            color = badgeColor.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                                                Text(
+                                                    text = "الحالة: ${report.statusLabel}",
+                                                    color = badgeColor,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 15.sp
+                                                )
+                                                if (!report.amountLabel.isNullOrBlank()) {
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = "القيمة المطلوبة: ${report.amountLabel}",
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        fontSize = 18.sp
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = "التقرير:",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Text(
+                                                text = report.details,
+                                                fontSize = 13.sp,
+                                                lineHeight = 20.sp,
+                                                modifier = Modifier.fillMaxWidth().padding(10.dp)
+                                            )
+                                        }
+                                    }
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = { AutomationExecutionEngine.dismissReport() }
+                                    ) {
+                                        Text("إغلاق")
+                                    }
+                                },
+                                dismissButton = {
+                                    OutlinedButton(
+                                        onClick = { TextToSpeechManager.speak(report.spokenText, isArabic = true) }
+                                    ) {
+                                        Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("نطق النتيجة")
+                                    }
+                                }
+                            )
                         }
                     }
                 }

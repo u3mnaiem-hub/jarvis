@@ -671,7 +671,7 @@ object DemoWorkflows {
                     description = "فتح بوابة الاستعلام عن فواتير كهرباء الإسكندرية",
                     actionType = ActionType.OPEN_URL,
                     isWebStep = true,
-                    url = "https://aedco.gov.eg/",
+                    url = "https://alex.ahram.org.eg/",
                     delayAfterMs = 2500,
                     spokenMessage = "جاري فتح بوابة كهرباء الإسكندرية"
                 ),
@@ -682,25 +682,29 @@ object DemoWorkflows {
                     actionType = ActionType.SET_TEXT,
                     isWebStep = true,
                     textPayload = paymentCode,
+                    cssSelector = "#Reference",
                     candidateTexts = listOf("رقم السداد", "الرقم الالي", "الرقم الآلي", "كود السداد"),
-                    candidateCssSelectors = listOf("input[name*='pay' i]", "input[name*='code' i]", "input[type='text']"),
+                    candidateCssSelectors = listOf("#Reference", "input[name='Reference']", "input[placeholder*='الرقم' i]", "input[name*='pay' i]", "input[name*='code' i]", "input[type='text']"),
                     delayAfterMs = 1000
                 ),
                 AutomationStep(
                     order = 3,
                     title = "Click Search",
-                    description = "الضغط على زر استعلام / بحث",
+                    description = "الضغط على زر بحث / استعلام",
                     actionType = ActionType.CLICK_ELEMENT,
                     isWebStep = true,
-                    selectorText = "استعلام",
-                    candidateTexts = listOf("استعلام", "بحث", "عرض الفاتورة"),
-                    delayAfterMs = 2500
+                    cssSelector = "#contact_form button[type='submit']",
+                    candidateCssSelectors = listOf("#contact_form button[type='submit']", "button[type='submit']", "input[type='submit']"),
+                    selectorText = "بحث",
+                    candidateTexts = listOf("بحث", "استعلام", "عرض الفاتورة"),
+                    delayAfterMs = 3500
                 ),
                 AutomationStep(
                     order = 4,
                     title = "Read & Announce Bill",
                     description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
                     actionType = ActionType.SCRAPE_AND_SPEAK,
+                    isWebStep = true,
                     delayAfterMs = 1000
                 )
             )
@@ -758,13 +762,14 @@ object DemoWorkflows {
                     isWebStep = true,
                     selectorText = "استعلام",
                     candidateTexts = listOf("استعلام", "بحث", "التالي"),
-                    delayAfterMs = 2500
+                    delayAfterMs = 3500
                 ),
                 AutomationStep(
                     order = 4,
                     title = "Read & Announce Bill",
                     description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
                     actionType = ActionType.SCRAPE_AND_SPEAK,
+                    isWebStep = true,
                     delayAfterMs = 1000
                 )
             )
@@ -821,13 +826,14 @@ object DemoWorkflows {
                     isWebStep = true,
                     selectorText = "استعراض",
                     candidateTexts = listOf("استعراض الفواتير", "عرض", "بحث", "استعلام"),
-                    delayAfterMs = 2500
+                    delayAfterMs = 3500
                 ),
                 AutomationStep(
                     order = 4,
                     title = "Read & Announce Bill",
                     description = "قراءة قيمة الفاتورة وحالتها ونطقها صوتياً",
                     actionType = ActionType.SCRAPE_AND_SPEAK,
+                    isWebStep = true,
                     delayAfterMs = 1000
                 )
             )

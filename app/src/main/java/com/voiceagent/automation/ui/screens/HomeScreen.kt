@@ -793,7 +793,10 @@ fun HomeScreen(
 
         // Built-in / Favorite Quick Automations (Vertical, Equal Width, Full Text Visible)
         val favoriteList = automations.filter { it.isFavorite }
-        if (favoriteList.isNotEmpty()) {
+        val hiddenList = automations.filter { !it.isFavorite }
+        var showHiddenTasks by remember { mutableStateOf(false) }
+
+        if (automations.isNotEmpty()) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -806,8 +809,30 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold,
                         color = LightTextPrimary
                     )
-                    TextButton(onClick = onNavigateToMyAutomations) {
-                        Text("عرض الكل (${automations.size})", fontSize = 12.sp, color = Emerald600, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (hiddenList.isNotEmpty()) {
+                            TextButton(
+                                onClick = { showHiddenTasks = !showHiddenTasks },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (showHiddenTasks) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = null,
+                                    tint = Amber600,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (showHiddenTasks) "إخفاء المخفية" else "المخفية (${hiddenList.size})",
+                                    fontSize = 11.5.sp,
+                                    color = Amber600,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        TextButton(onClick = onNavigateToMyAutomations) {
+                            Text("عرض الكل (${automations.size})", fontSize = 12.sp, color = Emerald600, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -876,6 +901,84 @@ fun HomeScreen(
                             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(15.dp))
                             Spacer(modifier = Modifier.width(3.dp))
                             Text("تشغيل", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            if (showHiddenTasks && hiddenList.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "المهام المخفية (${hiddenList.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Amber600,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    )
+                }
+                items(hiddenList) { hiddenAuto ->
+                    GlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .clickable {
+                                AutomationExecutionEngine.executeAutomation(context, hiddenAuto)
+                            },
+                        cornerRadius = 14.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Amber100),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Amber600, modifier = Modifier.size(17.dp))
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = hiddenAuto.nameAr.ifBlank { hiddenAuto.name },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp,
+                                lineHeight = 15.sp,
+                                color = LightTextPrimary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        db.automationDao().insertOrUpdate(hiddenAuto.copy(isFavorite = true))
+                                        Toast.makeText(context, "تم إظهار المهمة في الرئيسية", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Visibility, contentDescription = null, tint = Emerald600, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("إظهار", fontSize = 11.sp, color = Emerald600, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Button(
+                                onClick = { AutomationExecutionEngine.executeAutomation(context, hiddenAuto) },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("تشغيل", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

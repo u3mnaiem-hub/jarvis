@@ -43,7 +43,10 @@ class VoiceAgentApp : Application() {
                         DemoWorkflows.createAlexElectricityBillWorkflow(),
                         DemoWorkflows.createAlexWaterBillWorkflow(),
                         DemoWorkflows.createPetrotradeGasBillWorkflow()
-                    )
+                    ).map { macro ->
+                        val existing = db.automationDao().getAutomationById(macro.id)
+                        if (existing != null) macro.copy(isFavorite = existing.isFavorite, isEnabled = existing.isEnabled) else macro
+                    }
                     val deviceWorkflows = DemoWorkflows.getDeviceRouterWorkflows()
                     db.automationDao().insertAll(listOf(enableTvWorkflow, disableTvWorkflow) + utilities + deviceWorkflows)
                     prefs.edit().putInt("router_workflows_version", ROUTER_WORKFLOWS_VERSION).apply()
@@ -71,7 +74,7 @@ class VoiceAgentApp : Application() {
 
     companion object {
         /** Bump to force re-seeding of the built-in router workflows on next app start. */
-        private const val ROUTER_WORKFLOWS_VERSION = 4
+        private const val ROUTER_WORKFLOWS_VERSION = 5
 
         lateinit var instance: VoiceAgentApp
             private set

@@ -26,10 +26,23 @@ object AutomationExecutionEngine {
     private val _executionState = MutableStateFlow<ExecutionState>(ExecutionState.Idle)
     val executionState: StateFlow<ExecutionState> = _executionState.asStateFlow()
 
+    private val _latestReportFlow = MutableStateFlow<ExecutionReport?>(null)
+    val latestReportFlow: StateFlow<ExecutionReport?> = _latestReportFlow.asStateFlow()
+
     @Volatile
     private var isStopRequested = false
 
+    @Volatile
+    private var lastAutomationTitle: String = ""
+
+    @Volatile
+    private var reportSpokenInRun: Boolean = false
+
     private var executionJob: Job? = null
+
+    fun dismissReport() {
+        _latestReportFlow.value = null
+    }
 
     fun requestStop() {
         Log.w(TAG, "Emergency stop requested by user!")
@@ -50,6 +63,9 @@ object AutomationExecutionEngine {
         }
 
         isStopRequested = false
+        reportSpokenInRun = false
+        lastAutomationTitle = automation.nameAr.ifBlank { automation.name }
+        _latestReportFlow.value = null
         val totalSteps = automation.steps.size
 
         executionJob = CoroutineScope(Dispatchers.IO).launch {
@@ -627,6 +643,22 @@ object AutomationExecutionEngine {
                 StepResult(ok, if (ok) null else "Failed to submit web form via Enter", elementFound = ok, actionAttempted = true, actionConfirmed = ok)
             }
 
+            ActionType.SCRAPE_AND_SPEAK -> {
+                val pageText = webEngine.extractVisiblePageText()
+                Log.d(TAG, "Web SCRAPE_AND_SPEAK extracted ${pageText.length} chars")
+                val report = parseAndFormatWebBillReport(
+                    pageText = pageText,
+                    title = lastAutomationTitle.ifBlank { step.title },
+                    fallbackMessage = step.spokenMessage ?: step.textPayload
+                )
+                _latestReportFlow.value = report
+                reportSpokenInRun = true
+                if (SafeModeManager.isTtsEnabled(context)) {
+                    TextToSpeechManager.speak(report.spokenText, isArabic = true)
+                }
+                StepResult(true, report.spokenText, elementFound = true, actionAttempted = true, actionConfirmed = true)
+            }
+
             else -> StepResult(false, "Unsupported web step: ${step.actionType}", actionAttempted = false, elementFound = false)
         }
     }
@@ -646,7 +678,8 @@ object AutomationExecutionEngine {
                 ActionType.SET_INDEXED_RADIO,
                 ActionType.SET_TEXT,
                 ActionType.INJECT_CREDENTIAL,
-                ActionType.PRESS_ENTER
+                ActionType.PRESS_ENTER,
+                ActionType.SCRAPE_AND_SPEAK
             )
         ) {
             return executeWebStep(webEngine, db, step, context, lastWaitedElementText)
@@ -930,7 +963,14 @@ object AutomationExecutionEngine {
                 val texts = service?.extractAllVisibleTexts() ?: emptyList()
                 Log.d(TAG, "SCRAPE_AND_SPEAK visible texts (${texts.size}): $texts")
                 val speechMessage = parseAndFormatQuotaInfo(texts, step.spokenMessage ?: step.textPayload)
-                TextToSpeechManager.speak(speechMessage)
+                _latestReportFlow.value = ExecutionReport(
+                    title = lastAutomationTitle.ifBlank { step.title },
+                    statusLabel = "تمت القراءة",
+                    details = speechMessage,
+                    spokenText = speechMessage
+                )
+                reportSpokenInRun = true
+                TextToSpeechManager.speak(speechMessage, isArabic = true)
                 return StepResult(true, speechMessage, actionAttempted = true, actionConfirmed = true)
             }
 
@@ -972,6 +1012,124 @@ object AutomationExecutionEngine {
                 }
             }
         } ?: false
+    }
+
+    private fun parseAndFormatWebBillReport(
+        pageText: String,
+        title: String,
+        fallbackMessage: String?
+    ): ExecutionReport {
+        val lines = pageText.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) {
+            val msg = fallbackMessage ?: "تعذر قراءة محتوى صفحة $title. تأكد من الاتصال بالإنترنت."
+            return ExecutionReport(
+                title = title,
+                statusLabel = "لم يتم العثور على بيانات",
+                details = msg,
+                spokenText = msg
+            )
+        }
+
+        val fullLower = pageText.lowercase()
+        val paidKeywords = listOf(
+            "مدفوعة", "مدفوعه", "مسددة", "مسدده", "تم السداد", "خالص",
+            "لا توجد فواتير", "لا يوجد فواتير", "لا توجد مستحقات", "لا يوجد مستحقات",
+            "لا يوجد فواتير مستحقة", "paid", "no bills"
+        )
+        val errorKeywords = listOf(
+            "غير موجود", "رقم غير صحيح", "لم يتم العثور", "لا توجد بيانات", "تأكد من", "خطأ في"
+        )
+        val amountKeywords = listOf(
+            "القيمة", "قيمة الفاتورة", "المبلغ", "المطلوب", "المستحق", "إجمالي", "الاجمالي", "اجمالي",
+            "رصيد", "الفاتورة", "سداد", "amount", "total", "due"
+        )
+        val detailKeywords = listOf(
+            "الاسم", "المشترك", "العميل", "الشهر", "الفترة", "تاريخ", "الإصدار",
+            "عدد الفواتير", "الاستهلاك", "القراءة", "الحالة", "السداد", "القيمة", "المبلغ", "المطلوب", "إجمالي"
+        )
+
+        val currencyRegex = Regex("""(\d+(?:[.,]\d+)?)\s*(?:جنيه|ج\.م|جم|EGP|LE)""", RegexOption.IGNORE_CASE)
+        val numberRegex = Regex("""\b(\d{1,6}(?:[.,]\d{1,2})?)\b""")
+
+        var matchedAmount: String? = null
+        for (line in lines) {
+            val cMatch = currencyRegex.find(line)
+            if (cMatch != null) {
+                matchedAmount = cMatch.groupValues[1]
+                break
+            }
+        }
+        if (matchedAmount == null) {
+            for (i in lines.indices) {
+                val lineLower = lines[i].lowercase()
+                if (amountKeywords.any { lineLower.contains(it) }) {
+                    val nMatch = numberRegex.find(lines[i])
+                        ?: lines.getOrNull(i + 1)?.let { numberRegex.find(it) }
+                    if (nMatch != null) {
+                        matchedAmount = nMatch.groupValues[1]
+                        break
+                    }
+                }
+            }
+        }
+
+        val hasPaidKeyword = paidKeywords.any { fullLower.contains(it) }
+        val errorLine = lines.firstOrNull { line -> errorKeywords.any { line.lowercase().contains(it) } }
+        val amountNumeric = matchedAmount?.replace(",", ".")?.toDoubleOrNull()
+
+        val isPaid: Boolean? = when {
+            hasPaidKeyword && (amountNumeric == null || amountNumeric == 0.0) -> true
+            hasPaidKeyword -> true
+            amountNumeric != null && amountNumeric > 0.0 -> false
+            else -> null
+        }
+
+        val statusLabel = when {
+            isPaid == true -> "مدفوعة"
+            isPaid == false -> "مطلوب السداد"
+            errorLine != null -> "تعذر الاستعلام"
+            else -> "نتيجة الاستعلام"
+        }
+
+        val amountLabel = when {
+            matchedAmount != null -> "$matchedAmount جنيه"
+            isPaid == true -> "0 جنيه (مدفوعة)"
+            else -> null
+        }
+
+        val relevantLines = lines.filter { line ->
+            detailKeywords.any { line.contains(it, ignoreCase = true) } ||
+                paidKeywords.any { line.contains(it, ignoreCase = true) } ||
+                currencyRegex.containsMatchIn(line)
+        }.distinct().take(8)
+
+        val detailsText = if (relevantLines.isNotEmpty()) {
+            relevantLines.joinToString("\n")
+        } else {
+            lines.take(8).joinToString("\n")
+        }
+
+        val spokenText = when {
+            isPaid == true && matchedAmount != null && (amountNumeric ?: 0.0) > 0.0 ->
+                "بخصوص $title: الفاتورة مدفوعة، وقيمتها $matchedAmount جنيه."
+            isPaid == true ->
+                "بخصوص $title: الفاتورة مدفوعة ولا توجد مبالغ مستحقة."
+            matchedAmount != null ->
+                "بخصوص $title: القيمة المطلوبة هي $matchedAmount جنيه مصري."
+            errorLine != null ->
+                "بخصوص $title: $errorLine"
+            else ->
+                "تم فتح $title، وظهرت النتيجة على الشاشة."
+        }
+
+        return ExecutionReport(
+            title = title,
+            statusLabel = statusLabel,
+            amountLabel = amountLabel,
+            isPaid = isPaid,
+            details = detailsText,
+            spokenText = spokenText
+        )
     }
 
     private fun parseAndFormatQuotaInfo(texts: List<String>, fallbackMessage: String?): String {
@@ -1365,7 +1523,9 @@ object AutomationExecutionEngine {
 
         if (automation.speakStepProgress && SafeModeManager.isTtsEnabled(context)) {
             if (isSuccess) {
-                TextToSpeechManager.speak("Workflow completed successfully")
+                if (!reportSpokenInRun) {
+                    TextToSpeechManager.speak("Workflow completed successfully")
+                }
             } else {
                 TextToSpeechManager.speak("Execution stopped: ${failedStepTitle ?: "Error"}")
             }

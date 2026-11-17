@@ -195,6 +195,16 @@ fun MyAutomationsScreen(
                                 db.automationDao().insertOrUpdate(auto.copy(isEnabled = isEnabled))
                             }
                         },
+                        onToggleFavorite = { showOnHome ->
+                            coroutineScope.launch {
+                                db.automationDao().insertOrUpdate(auto.copy(isFavorite = showOnHome))
+                                Toast.makeText(
+                                    context,
+                                    if (showOnHome) "تم إظهار المهمة في الرئيسية" else "تم إخفاء المهمة من الرئيسية",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
                         onDuplicate = {
                             coroutineScope.launch {
                                 val duplicate = auto.copy(
@@ -235,6 +245,7 @@ fun AutomationCard(
     onRun: () -> Unit,
     onEdit: () -> Unit,
     onToggle: (Boolean) -> Unit,
+    onToggleFavorite: (Boolean) -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
     onExport: () -> Unit
@@ -366,6 +377,17 @@ fun AutomationCard(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(
+                        onClick = { onToggleFavorite(!automation.isFavorite) },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (automation.isFavorite) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (automation.isFavorite) "إخفاء من الرئيسية" else "إظهار في الرئيسية",
+                            tint = if (automation.isFavorite) Emerald600 else Amber500,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                     IconButton(
                         onClick = onEdit,
                         modifier = Modifier.size(34.dp)

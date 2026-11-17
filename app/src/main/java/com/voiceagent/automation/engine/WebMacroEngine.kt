@@ -1057,6 +1057,37 @@ class WebMacroEngine(private val context: Context) {
         return res
     }
 
+    /**
+     * Extracts visible text from the current page (and same-origin iframes) for bill/result scraping.
+     */
+    suspend fun extractVisiblePageText(): String {
+        val js = """
+            (function() {
+                var chunks = [];
+                function collect(doc) {
+                    if (!doc || !doc.body) return;
+                    var txt = (doc.body.innerText || doc.body.textContent || '').trim();
+                    if (txt) chunks.push(txt);
+                    var frames = doc.querySelectorAll('iframe, frame');
+                    for (var i = 0; i < frames.length; i++) {
+                        try {
+                            var fDoc = frames[i].contentDocument || frames[i].contentWindow.document;
+                            collect(fDoc);
+                        } catch (e) {}
+                    }
+                }
+                collect(document);
+                return chunks.join('\n');
+            })();
+        """.trimIndent()
+        val raw = evalJs(js) ?: return ""
+        return try {
+            if (raw == "null") "" else org.json.JSONTokener(raw).nextValue()?.toString() ?: ""
+        } catch (_: Exception) {
+            raw.trim('"')
+        }
+    }
+
     private suspend fun elementExists(
         cssSelectors: List<String>,
         textCandidates: List<String>

@@ -143,7 +143,7 @@ class VoiceAccessibilityService : AccessibilityService() {
         return false
     }
 
-    /** Single tap on the floating button: stop + save the macro while staying on the current app. */
+    /** Single tap on the floating button: stop recording, keep steps, and let the user save in Jarvis. */
     private fun onOverlayStopTapped(tapDownTimeMs: Long) {
         if (isStoppingFromOverlay) return
         isStoppingFromOverlay = true
@@ -170,40 +170,16 @@ class VoiceAccessibilityService : AccessibilityService() {
 
         if (cleanedSteps.isEmpty()) {
             AutomationRecorderEngine.cancelRecording()
-            Toast.makeText(applicationContext, "No steps recorded – nothing saved", Toast.LENGTH_SHORT).show()
+            Toast.makeText(applicationContext, "لم يتم تسجيل أي خطوات", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val name = AutomationRecorderEngine.pendingWorkflowName.trim().ifBlank {
-            "Macro " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
-        }
-        val nameAr = AutomationRecorderEngine.pendingWorkflowNameAr.trim().ifBlank { name }
-        val phrase = AutomationRecorderEngine.pendingVoicePhrase.trim()
-        val automation = Automation(
-            name = name,
-            nameAr = nameAr,
-            voicePhrases = if (phrase.isNotBlank()) listOf(phrase) else emptyList(),
-            steps = cleanedSteps
-        )
-        val appContext = applicationContext
-
-        // Save in the background; never start any Jarvis activity so the user stays on the current app.
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            try {
-                VoiceAgentDatabase.getInstance(appContext).automationDao().insertOrUpdate(automation)
-                AutomationRecorderEngine.cancelRecording()
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "Macro saved", Toast.LENGTH_SHORT).show()
-                }
-                Log.i(TAG, "Macro '${automation.name}' saved from overlay with ${cleanedSteps.size} steps")
-            } catch (e: Exception) {
-                // Keep the (stopped) steps in the recorder so the user can still save from the in-app screen.
-                Log.e(TAG, "Failed to save macro from overlay: ${e.message}", e)
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "Failed to save macro", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
+        Toast.makeText(
+            applicationContext,
+            "تم إيقاف التسجيل (${cleanedSteps.size} خطوات) - عد إلى جارفيس لحفظ المهمة",
+            Toast.LENGTH_LONG
+        ).show()
+        Log.i(TAG, "Recording stopped from overlay with ${cleanedSteps.size} steps kept for saving")
     }
 
     private fun handleRecordingEvent(event: AccessibilityEvent) {

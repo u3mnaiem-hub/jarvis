@@ -4,6 +4,16 @@ import com.voiceagent.automation.model.Automation
 import com.voiceagent.automation.model.AutomationStep
 import com.voiceagent.automation.model.ExecutionLog
 
+data class ExecutionReport(
+    val title: String,
+    val statusLabel: String,
+    val amountLabel: String? = null,
+    val isPaid: Boolean? = null,
+    val details: String,
+    val spokenText: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 sealed class ExecutionState {
     object Idle : ExecutionState()
     data class Running(
